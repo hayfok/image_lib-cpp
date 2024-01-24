@@ -105,8 +105,9 @@ class PNG {
             // look into ramifications of this on all possible architectures 
             unsigned int little_to_big_endian(std::ifstream& file, unsigned long& chunk_size){
                 std::vector<char> endian_buff { };
+                if(!endian_buff.empty()) endian_buff.clear();
+                
                 for(int i { }; i < 4; ++i){ endian_buff.push_back(file.get()); --chunk_size; };
-                endian_buff.clear();
                 return (int)endian_buff[3] | (int)endian_buff[2]<<8 | (int)endian_buff[1]<<16 | (int)endian_buff[0]<<24; 
             };
 };
