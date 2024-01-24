@@ -11,7 +11,5 @@ int main()
         sig_buff->push_back(i);
         std::cout << sig_buff->at(i) << "\n";
     };
-
-   
-  
+ 
 }
