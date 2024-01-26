@@ -3,19 +3,25 @@
 #include <string>
 #include <vector>
 #include <cassert>
-#include "./h/png.h"
-
+// #include "./h/png.h"
+#include "./h/image.h"
 
 int main(){
 	
     std::string filepath = "./images/red.png";
 
-	PNG image ( filepath );
-   
-    unsigned long h = image.height();
-    unsigned long w = image.width();
+	//PNG png( filepath );
+    Image image( filepath );
 
-    std::cout << w << "\n" << h << "\n";
+   
+    // unsigned long h = png.height();
+    // unsigned long w = png.width();
+
+    // std::cout << w << "\n" << h << "\n";
+
+    //std::vector<unsigned int> v = image.crc_table;
+
+    image.print_type();
 
 	return 0;
 };

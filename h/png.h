@@ -1,17 +1,43 @@
-// #include <iostream>
-// #include <string>
-// #include <fstream>
-// #include <vector>
-// #include <utility>
+// #pragma once
 
-//              ===             global functions
+
+//              ===             global 
+
+struct CRC_TABLE {
+    std::vector<unsigned long> t { };
+    unsigned long c { };
+    CRC_TABLE() {
+        for(int n { 0xFFFFFF }; n > 0; --n){
+            c = (unsigned long) n;
+            for(int k { }; k < 8; ++k){
+                // AUTODIN II polynomial
+                if (c & 1) c = 0xedb88320L ^ (c >> 1); // XOR
+                else c = c >> 1;
+            }
+            t.push_back(c);
+        }
+    };
+
+
+} crc_table { };
 
 // look into ramifications 
-        unsigned long static little_to_big_endian(std::vector<char>& endian_buff){
-            return (int)endian_buff[3] | (int)endian_buff[2]<<8 | (int)endian_buff[1]<<16 | (int)endian_buff[0]<<24; 
-        };
+// operational order: cast to unsigned int, bitshift right by x, bitwise OR (top -> down)
+// 32 bit endian conversion
+unsigned int little_to_big_endian(std::vector<char>& b){
+    return (unsigned int)b[3] | (unsigned int)b[2]<<8 | (unsigned int)b[1]<<16 | (unsigned int)b[0]<<24; 
+};
 
-//              ===             global functions
+// "Please don't implement your own when you can use the zlib library instead." - fuck off
+bool crc_32(){
+
+    return true;
+};
+
+//              ===             global 
+
+
+
 
 
 //              ===             forward declaring class chunks
@@ -28,21 +54,26 @@ class IHDR {
 
             // probably not the best way to do this
             for(int i { }; i < 4; ++i){ endian_buff.push_back(file.get()); --length; }; // offsets file by 4 bytes
-            png_width   = little_to_big_endian(endian_buff);    endian_buff.clear();
+            png_width   = little_to_big_endian(endian_buff);    endian_buff.clear();    // clear buffer
             for(int i { }; i < 4; ++i){ endian_buff.push_back(file.get()); --length; }; // offsets file by 4 bytes
-            png_height  = little_to_big_endian(endian_buff);    endian_buff.clear();
+            png_height  = little_to_big_endian(endian_buff);    endian_buff.clear();    // clear buffer
 
 
             // all remaining ihdr bytes are size 1
-            b_depth          = (int)file.get(); --length;
-            color_type       = (int)file.get(); --length;
-            comp_method      = (int)file.get(); --length;
-            filter_method    = (int)file.get(); --length;
-            interlace_method = (int)file.get(); --length;
-        }
+            b_depth          = (char)file.get(); --length;
+            color_type       = (char)file.get(); --length;
+            comp_method      = (char)file.get(); --length;
+            filter_method    = (char)file.get(); --length;
+            interlace_method = (char)file.get(); --length;
+
+            
+            if(!crc_32()) throw;
+        
+        };
+
         std::vector<char> header { };
-        unsigned long png_width { };    // little endian
-        unsigned long png_height { };   // little endian
+        unsigned int png_width { };     // little endian
+        unsigned int png_height { };    // little endian
         char b_depth { };               // valid values 1, 2, 4, 8, 16
         char color_type { };            // valid values 0, 2, 3, 4, 6
         char comp_method { };           // should be 0 for standard
@@ -53,6 +84,9 @@ class IHDR {
 //              ===             forward declaring class chunks
 
 
+
+
+
 //              ===             encoding classes
 
 class PNG {
@@ -60,31 +94,38 @@ class PNG {
        
         
     public:
-        IHDR ihdr;
-
-        PNG(std::string &filepath) {
+        PNG(){};
+        PNG(std::ifstream& file) {
         
-            std::ifstream file { filepath, std::ios_base::binary | std::ios_base::in }; 
-            std::pair<unsigned long, unsigned long> pair_cid_csize { };
+            //std::ifstream file { filepath, std::ios_base::binary | std::ios_base::in }; 
+            std::pair<unsigned long, unsigned long> pair_id_size { };
 
-            if(!file.is_open())
-	        { std::cerr << "Error opening: " << filepath << "\n"; throw; };
+            //if(!file.is_open())
+	        //{ std::cerr << "Error opening: " << filepath << "\n"; throw; };
 
-            validate_header(file);                      // offsets file by 8 bytes
-            pair_cid_csize = identify_chunk(file);      // offsets file by 8 bytes
+            //validate_header(file); // offsets file by 8 bytes
+            
+            while(!file.eof()){
+                // file position guaranteed to be at beginning of chunk
 
-            switch(pair_cid_csize.first){
-                case 295:
-                    ihdr.make_ihdr(file, pair_cid_csize.second);
-                    // how can i create an object of type IHDR in a scope
-                    // accessable to member functions here
-            }
+                // get chunk len and chunk 4 byte identifier
+                // offsets file by 8 bytes
+                pair_id_size = identify_chunk(file);  
+
+                switch(pair_id_size.first){
+                    case 295:
+                        ihdr.make_ihdr(file, pair_id_size.second); 
+                };
+
+                // early break while i work on this
+                break;
+
+            };
         };
 
         ~PNG(){};
 
-        
-
+        // user functions
         unsigned long width(){ return ihdr.png_width ; };
         unsigned long height(){ return ihdr.png_height; };
         
@@ -93,6 +134,7 @@ class PNG {
         std::vector<char> PNG_SIG  
         { '\x89', '\x50', '\x4e', '\x47', '\x0d', '\x0a', '\x1a', '\x0a' }; 
 
+
         void validate_header(std::ifstream &file){
 
             std::vector<char> head_buff { };
@@ -100,9 +142,10 @@ class PNG {
             for( int i { }; i < 8; ++i ) head_buff.push_back(file.get()); 
 
             // validate header as valid png
-            if(this->PNG_SIG != head_buff){ std::cout << "Bad PNG" << "\n"; throw; };
+            if(PNG_SIG != head_buff){ std::cout << "Bad PNG" << "\n"; throw; };
 
         };
+        
 
         std::pair<unsigned long, unsigned long> identify_chunk(std::ifstream& file){
            
@@ -113,8 +156,8 @@ class PNG {
             unsigned long chunk_id { };
             for(int i { }; i < 4; ++i){ chunk_id += file.get(); };  // get 4 byte chunk id
 
-            std::pair<unsigned long, unsigned long> pair_cid_csize{ chunk_id, chunk_size };
-            return pair_cid_csize;
+            std::pair<unsigned long, unsigned long> pair_id_size{ chunk_id, chunk_size };
+            return pair_id_size;
           
         };
 
