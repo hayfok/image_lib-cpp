@@ -1,4 +1,5 @@
 #include "./png.h"
+#include <variant>
 
 #pragma once
 
@@ -13,10 +14,12 @@ class Image
    
 	public:
 
+        
+        
         Image()
         { };
 
-        Image(std::string &file_path)
+        Image(std::string &file_path) : image_state()
         {
             std::ifstream file { file_path, std::ios_base::binary | std::ios_base::in }; 
 
@@ -24,13 +27,9 @@ class Image
 	        { std::cerr << "Error opening: " << file_path << "\n"; throw; };
 
             determine_image_state(file);
+            build_internal_object(image_state, file);
 
-            switch(image_state)
-            {
-                case 0: { std::cout << "NONE: Didn't overload constructor?" << "\n";  break; }
-                case 1: { PNG _png ( file ); break; };
-                case 2: { std::cout << "JPEG" << "\n"; break; }
-            }
+            
 
         };
 
@@ -42,14 +41,17 @@ class Image
                 case 1: { std::cout << "PNG" << "\n";  break; }
                 case 2: { std::cout << "JPEG" << "\n"; break; }
             }
-        }
+        };
 
         ~Image(){ };
 
+        // unsigned int width(){return _png.width(); };
+
     private:
 
+      
 
-        // update public member function PrintFormat when adding or removing enums
+         // update public member function PrintFormat when adding or removing enums
         enum ImageState 
         {
             state_None,
@@ -57,12 +59,21 @@ class Image
             state_Jpeg
         };
 
+
+        void build_internal_object(ImageState& state, std::ifstream& file){ 
+            switch(image_state)
+            {
+                case 0: { std::cout << "NONE: Didn't overload constructor?" << "\n";  break; }
+                //case 1: { auto _png = std::get<PNG>(p); }; 
+                case 2: { std::cout << "JPEG" << "\n"; break; }
+            }
+
+        };
+
         ImageState image_state { };
 
-        
         void determine_image_state(std::ifstream& file)
         {
-        
             std::vector<char> sig_buff (8);
 
             for(int i { }; i < sig_buff.size(); ++i)
@@ -70,8 +81,11 @@ class Image
 
             if(sig_buff == PNG_SIG) { image_state = state_Png; };
 
-
-        
         };
- 
+
+        // U obj = whatTheFuck(image_state)
+        // {
+        //     return PNG* _png;
+        // };
+
 };

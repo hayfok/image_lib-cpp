@@ -1,8 +1,9 @@
-// #pragma once
+#pragma once
 
 
 //              ===             global 
 
+// 3 byte crc
 struct CRC_TABLE {
     std::vector<unsigned long> t { };
     unsigned long c { };
@@ -13,9 +14,9 @@ struct CRC_TABLE {
                 // AUTODIN II polynomial
                 if (c & 1) c = 0xedb88320L ^ (c >> 1); // XOR
                 else c = c >> 1;
-            }
+            };
             t.push_back(c);
-        }
+        };
     };
 
 

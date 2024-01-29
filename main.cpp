@@ -22,6 +22,9 @@ int main(){
     //std::vector<unsigned int> v = image.crc_table;
 
     image.print_type();
+    //unsigned int i = image.width();
+
+    //std::cout << i << "\n";
 
 	return 0;
 };
