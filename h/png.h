@@ -1,127 +1,278 @@
-// #include <iostream>
-// #include <string>
-// #include <fstream>
-// #include <vector>
-// #include <utility>
 
-//              ===             global functions
+
+struct CRC_TABLE 
+{
+    std::vector<unsigned long> t;
+    unsigned long c;
+
+    CRC_TABLE() 
+    {
+        for(int n { 256 }; n > 0; --n)
+        {
+            c = (unsigned long) n;
+            for(int k { }; k < 8; ++k)
+            {
+                // AUTODIN II polynomial
+                // 0xedb88320L
+                (c & 1) ? c = 0x04C11DBL ^ (c >> 1) : c = c >> 1;
+            };
+            t.push_back(c);
+        };
+    };
+
+} crc_table;
+
+
+void print_byte(char &c){ std::cout << c << "\n"; };
+
+// 32 bit crc validation
+// all bytes after the length up to the crc bytes
+void crc_32(std::ifstream &file)
+{
+    // doing nothing for now, need to impliment this
+    for(int i { 4 }; i > 0; --i){ file.get(); };
+};
+
+
 
 // look into ramifications 
-        unsigned long static little_to_big_endian(std::vector<char>& endian_buff){
-            return (int)endian_buff[3] | (int)endian_buff[2]<<8 | (int)endian_buff[1]<<16 | (int)endian_buff[0]<<24; 
-        };
+unsigned long little_to_big_endian(std::vector<char> &endian_buff)
+{
+    return (int)endian_buff[3] | (int)endian_buff[2]<<8 | (int)endian_buff[1]<<16 | (int)endian_buff[0]<<24;
+};
 
-//              ===             global functions
 
 
-//              ===             forward declaring class chunks
 
-// 73 72 68 82
-class IHDR {
+
+
+
+
+
+
+
+
+
+
+
+
+
+class Chunks 
+{
+
     public:
-        IHDR(){};
-        void make_ihdr(std::ifstream& file, unsigned long length){
-            // offset of file will be at byte 16
-            // chunk size will be 8 less (size and id have been read)
+    // IHDR
+        unsigned long png_width { };             // little endian
+        unsigned long png_height { };            // little endian
+        unsigned char b_depth { };               // valid values 1, 2, 4, 8, 16
+        unsigned char color_type { };            // valid values 0, 2, 3, 4, 6
+        unsigned char comp_method { };           // should be 0 for standard
+        unsigned char filter_method { };         // should be 0 for standard
+        unsigned char interlace_method { };      // 0 == no interlace, 1 == Adam7
+    // sRGB
 
+        // 0 == Perceptual
+        // 1 == Relative Colorimetric
+        // 2 == Saturation
+        // 3 == Absolute Colorimetric
+        char rendering_intent { };
+    // gAMA
+        unsigned long gamma { };
+    // pHYs
+        unsigned long pixel_per_unit_x { };
+        unsigned long pixel_per_unit_y { };
+
+        // 0 == unknown
+        // 1 == meter
+        unsigned char unit_specificer { };
+
+
+    // 0x49 0x48 0x44 0x52
+        void make_ihdr(std::ifstream& file, unsigned long length)
+        {
+          
             std::vector<char> endian_buff { };
+            std::vector<char> header { };
 
-            // probably not the best way to do this
-            for(int i { }; i < 4; ++i){ endian_buff.push_back(file.get()); --length; }; // offsets file by 4 bytes
-            png_width   = little_to_big_endian(endian_buff);    endian_buff.clear();
-            for(int i { }; i < 4; ++i){ endian_buff.push_back(file.get()); --length; }; // offsets file by 4 bytes
-            png_height  = little_to_big_endian(endian_buff);    endian_buff.clear();
+            // get the width
+            for(int i = 0; i < 4; ++i)
+            { 
+                endian_buff.push_back(file.get()); 
+                --length; 
+            };
+            this->png_width = little_to_big_endian(endian_buff);
+            endian_buff.clear();
 
+            // get the height
+            for(int i = 0; i < 4; ++i)
+            { 
+                endian_buff.push_back(file.get()); 
+                --length; 
+            }; 
+            this->png_height = little_to_big_endian(endian_buff);
+            endian_buff.clear();
 
             // all remaining ihdr bytes are size 1
-            b_depth          = (int)file.get(); --length;
-            color_type       = (int)file.get(); --length;
-            comp_method      = (int)file.get(); --length;
-            filter_method    = (int)file.get(); --length;
-            interlace_method = (int)file.get(); --length;
-        }
-        std::vector<char> header { };
-        unsigned long png_width { };    // little endian
-        unsigned long png_height { };   // little endian
-        char b_depth { };               // valid values 1, 2, 4, 8, 16
-        char color_type { };            // valid values 0, 2, 3, 4, 6
-        char comp_method { };           // should be 0 for standard
-        char filter_method { };         // should be 0 for standard
-        char interlace_method { };      // 0 == no interlace, 1 == Adam7
-} ihdr { };
+            this->b_depth          = (int)file.get(); --length;
+            this->color_type       = (int)file.get(); --length;
+            this->comp_method      = (int)file.get(); --length;
+            this->filter_method    = (int)file.get(); --length;
+            this->interlace_method = (int)file.get(); --length;
 
-//              ===             forward declaring class chunks
+            if(length != 0) { std::cout << "file sync error" << "\n"; throw; };
 
 
-//              ===             encoding classes
 
-class PNG {
-    private:
-       
-        
-    public:
-        IHDR ihdr;
-
-        PNG(std::string &filepath) {
-        
-            std::ifstream file { filepath, std::ios_base::binary | std::ios_base::in }; 
-            std::pair<unsigned long, unsigned long> pair_cid_csize { };
-
-            if(!file.is_open())
-	        { std::cerr << "Error opening: " << filepath << "\n"; throw; };
-
-            validate_header(file);                      // offsets file by 8 bytes
-            pair_cid_csize = identify_chunk(file);      // offsets file by 8 bytes
-
-            switch(pair_cid_csize.first){
-                case 295:
-                    ihdr.make_ihdr(file, pair_cid_csize.second);
-                    // how can i create an object of type IHDR in a scope
-                    // accessable to member functions here
-            }
+            crc_32(file); // offsets files by 4 bytes
         };
+
+    // 0x73 0x52 0x47 0x42
+        void make_sRGB(std::ifstream &file, unsigned long &length)
+        {
+            this->rendering_intent = file.get(); --length;
+
+            if(length != 0) { std::cout << "file sync error" << "\n"; throw; };
+
+            crc_32(file); // offsets files by 4 bytes
+        };
+
+    // 0x67 0x41 0x4D 0x41
+        void make_gAMA(std::ifstream &file, unsigned long &length)
+        {
+            for(int i = 0; i < 4; ++i){ this->gamma = file.get(); --length; };
+
+            if(length != 0) { std::cout << "file sync error" << "\n"; throw; };
+
+            crc_32(file); // offsets files by 4 bytes
+        };
+
+        void sample_gamma(){
+            int sample { };
+            sample = sample / (2^b_depth - 1);
+        };
+
+    // 0x70 0x48 0x59 0x73
+        void make_pHYs(std::ifstream &file, unsigned long &length)
+        {
+            for(int i = 0; i < 4; ++i){ this->pixel_per_unit_x = file.get(); --length; };
+            for(int i = 0; i < 4; ++i){ this->pixel_per_unit_y = file.get(); --length; };
+
+            this->unit_specificer = file.get(); --length;
+
+            if(length != 0) { std::cout << "file sync error" << "\n"; throw; };
+
+            crc_32(file); // offsets files by 4 bytes
+        };
+
+    //0x49 0x44 0x54 0x78
+        void make_IDAT(std::ifstream &file, unsigned long &length)
+        {
+        
+
+            unsigned long data = this->png_width * this->png_height;
+            for(unsigned long h = this->png_height; h > 0; --h)
+            {
+                for(unsigned long w = this->png_height; w > 0; --w)
+                {
+                    std::cout << (char)file.get() << "\n";
+                };
+            }
+
+        };
+} Chunks;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class PNG 
+{
+    private:
+
+        void read_bytes(std::string &filepath)
+        {
+            std::ifstream file { filepath, std::ios_base::binary | std::ios_base::in }; 
+            unsigned long len, id;
+
+            len = id = 0;
+            
+            if(!file.is_open()){ std::cerr << "Error opening: " << filepath << "\n"; throw; };
+
+            validate_header(file); // offsets file reader by 8 bytes, only called once
+
+            identify_chunk(file, len, id); // offsets file reader by 8 bytes on every call
+
+            if(id != 295) std::cout << 
+            "WARNING! PNG header not followed by IDHR chunk" <<
+            " - We're decoding a questionably encoded PNG" << "\n";
+
+            Chunks.make_ihdr(file, len);
+
+            while(!file.eof())
+            {
+                len = id = 0;
+
+                identify_chunk(file, len, id); // offsets file reader by 8 bytes on every call
+
+                // it is a guarantee that the chunk is offset up to the first byte after the header
+                switch(id)
+                {
+                    //case 295: Chunks.make_ihdr(file, len); break;
+                    case 334: Chunks.make_sRGB(file, len); break;
+                    case 310: Chunks.make_gAMA(file, len); break;
+                    case 388: Chunks.make_pHYs(file, len); break;
+                    case 290: Chunks.make_IDAT(file, len); break;  
+                    default: 
+                        std::cout << "did not catch a chunk id" << "\n";
+                        throw;
+                };
+            };
+        };
+       
+    public:
+
+        PNG(std::string &filepath) { read_bytes(filepath); };
 
         ~PNG(){};
 
-        
-
-        unsigned long width(){ return ihdr.png_width ; };
-        unsigned long height(){ return ihdr.png_height; };
+        unsigned long width(){  return Chunks.png_width ; };
+        unsigned long height(){ return Chunks.png_height; };
         
     protected:
 
         std::vector<char> PNG_SIG  
-        { '\x89', '\x50', '\x4e', '\x47', '\x0d', '\x0a', '\x1a', '\x0a' }; 
+        { 
+            '\x89', '\x50', '\x4e', '\x47', '\x0d', '\x0a', '\x1a', '\x0a' 
+        }; 
 
-        void validate_header(std::ifstream &file){
+        void validate_header(std::ifstream &file)
+        {
+            std::vector<char> head_buff;
 
-            std::vector<char> head_buff { };
-            // read first 8 bytes into header buffer
-            for( int i { }; i < 8; ++i ) head_buff.push_back(file.get()); 
-
-            // validate header as valid png
-            if(this->PNG_SIG != head_buff){ std::cout << "Bad PNG" << "\n"; throw; };
-
+            for(int i { }; i < 8; ++i) head_buff.push_back(file.get());               // read first 8 bytes into header buffer
+            if(this->PNG_SIG != head_buff){ std::cout << "Bad PNG" << "\n"; throw; }; // validate header as valid png
         };
 
-        std::pair<unsigned long, unsigned long> identify_chunk(std::ifstream& file){
-           
-            unsigned long chunk_size { };
-            for(int i { }; i < 4; ++i){ chunk_size += file.get(); }; // get 4 byte chunk size 
-            // ofset is at byte 12
-
-            unsigned long chunk_id { };
-            for(int i { }; i < 4; ++i){ chunk_id += file.get(); };  // get 4 byte chunk id
-
-            std::pair<unsigned long, unsigned long> pair_cid_csize{ chunk_id, chunk_size };
-            return pair_cid_csize;
-          
-        };
-
-                
+        void identify_chunk(std::ifstream &file, unsigned long &len, unsigned long &id)
+        {
+            for(int i = 0; i < 4; ++i) { len += file.get(); };  // get 4 byte chunk size 
+            for(int i = 0; i < 4; ++i) { id  += file.get(); };  // get 4 byte chunk id
+        };           
 };
 
-//              ===             encoding classes
+
 
 
 
