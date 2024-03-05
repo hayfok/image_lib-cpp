@@ -1,3 +1,12 @@
+#include "zlib.h"
+
+#if defined(MSDOS) || defined(OS2) || defined(WIN32) || defined(__CYGWIN__)
+#  include <fcntl.h>
+#  include <io.h>
+#  define SET_BINARY_MODE(file) _setmode(_fileno(file), O_BINARY)
+#else
+#  define SET_BINARY_MODE(file)
+#endif
 
 
 struct CRC_TABLE 
@@ -36,26 +45,22 @@ void crc_32(std::ifstream &file)
 
 
 // look into ramifications 
-unsigned long little_to_big_endian(std::vector<char> &endian_buff)
+unsigned long little_to_big_endian(std::vector<int>& endian_buff)
 {
     return (int)endian_buff[3] | (int)endian_buff[2]<<8 | (int)endian_buff[1]<<16 | (int)endian_buff[0]<<24;
 };
 
+void inflate_idat()
+{
+    z_stream stream;
+    stream.zalloc   = Z_NULL;
+    stream.zfree    = Z_NULL;
+    stream.opaque   = Z_NULL;
+    stream.avail_in = 0;
+    stream.next_in  = Z_NULL;
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+}
 
 class Chunks 
 {
@@ -70,7 +75,6 @@ class Chunks
         unsigned char filter_method { };         // should be 0 for standard
         unsigned char interlace_method { };      // 0 == no interlace, 1 == Adam7
     // sRGB
-
         // 0 == Perceptual
         // 1 == Relative Colorimetric
         // 2 == Saturation
@@ -86,12 +90,12 @@ class Chunks
         // 1 == meter
         unsigned char unit_specificer { };
 
-
+    // IHDR
     // 0x49 0x48 0x44 0x52
         void make_ihdr(std::ifstream& file, unsigned long length)
         {
           
-            std::vector<char> endian_buff { };
+            std::vector<int> endian_buff { };
             std::vector<char> header { };
 
             // get the width
@@ -126,6 +130,10 @@ class Chunks
             crc_32(file); // offsets files by 4 bytes
         };
 
+    // IDAT
+        std::vector<char> data { };
+
+    // SRGB
     // 0x73 0x52 0x47 0x42
         void make_sRGB(std::ifstream &file, unsigned long &length)
         {
@@ -136,6 +144,7 @@ class Chunks
             crc_32(file); // offsets files by 4 bytes
         };
 
+    // GAMA
     // 0x67 0x41 0x4D 0x41
         void make_gAMA(std::ifstream &file, unsigned long &length)
         {
@@ -151,6 +160,7 @@ class Chunks
             sample = sample / (2^b_depth - 1);
         };
 
+    // PHYS
     // 0x70 0x48 0x59 0x73
         void make_pHYs(std::ifstream &file, unsigned long &length)
         {
@@ -164,37 +174,25 @@ class Chunks
             crc_32(file); // offsets files by 4 bytes
         };
 
-    //0x49 0x44 0x54 0x78
-        void make_IDAT(std::ifstream &file, unsigned long &length)
+    // IDAT
+    // 0x49 0x44 0x54 0x78
+        void make_IDAT(std::ifstream& file, unsigned long& length)
         {
-        
-
-            unsigned long data = this->png_width * this->png_height;
-            for(unsigned long h = this->png_height; h > 0; --h)
+            while (length != 0)
             {
-                for(unsigned long w = this->png_height; w > 0; --w)
-                {
-                    std::cout << (char)file.get() << "\n";
-                };
-            }
-
+               data.push_back(file.get());
+                --length; 
+            };
         };
-} Chunks;
+    
+    // IEND
+    // 0x49 0x45 0x4E 0x44
+    void make_IEND(std::ifstream& file, unsigned long& length)
+    {
+        // do nothing for now
+    };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+} Chunks { };
 
 
 class PNG 
@@ -234,11 +232,14 @@ class PNG
                     case 310: Chunks.make_gAMA(file, len); break;
                     case 388: Chunks.make_pHYs(file, len); break;
                     case 290: Chunks.make_IDAT(file, len); break;  
+                    case 288: 
                     default: 
                         std::cout << "did not catch a chunk id" << "\n";
                         throw;
                 };
             };
+
+            
         };
        
     public:
@@ -247,7 +248,7 @@ class PNG
 
         ~PNG(){};
 
-        unsigned long width(){  return Chunks.png_width ; };
+        unsigned long width() { return Chunks.png_width ; };
         unsigned long height(){ return Chunks.png_height; };
         
     protected:
@@ -265,16 +266,23 @@ class PNG
             if(this->PNG_SIG != head_buff){ std::cout << "Bad PNG" << "\n"; throw; }; // validate header as valid png
         };
 
-        void identify_chunk(std::ifstream &file, unsigned long &len, unsigned long &id)
+        void identify_chunk(std::ifstream& file, unsigned long& len, unsigned long& id)
         {
-            for(int i = 0; i < 4; ++i) { len += file.get(); };  // get 4 byte chunk size 
-            for(int i = 0; i < 4; ++i) { id  += file.get(); };  // get 4 byte chunk id
+            std::vector<int> b { };
+           
+            for(int i = 0; i < 4; ++i) b.push_back(file.get()); // get 4 byte chunk size 
+
+            len = little_to_big_endian(b);
+
+            for(int i = 0; i < 4; ++i) id  += file.get();       // get 4 byte chunk id
+
+            b.clear();
         };           
 };
 
 
 
-
+// 18783
 
 
 
