@@ -42,21 +42,6 @@ unsigned long little_to_big_endian(std::vector<char> &endian_buff)
 };
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class Chunks 
 {
 
@@ -180,19 +165,6 @@ class Chunks
 
         };
 } Chunks;
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
