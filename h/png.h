@@ -11,6 +11,8 @@
 #include "zconf.h"
 #include <vector>
 #include <fstream>
+#include <cassert>
+
 /* recommended per the zlib documentation
 *
 * todo: look into why this is important before implimenting
@@ -216,39 +218,62 @@ class Chunks
         {
             #define CHUNK 16384
 
+            unsigned char buffer[CHUNK];
+
             int codes               { }; // zlib return codes
-            unsigned long have      { }; // data returned
+            unsigned int have       { }; // number of bytes read
             z_stream stream;
             std::vector<char> out   { };
 
             stream.zalloc = Z_NULL;
             stream.zfree = Z_NULL;
             stream.opaque = Z_NULL;
-            stream.avail_in = data[0];
+            stream.avail_in = 0;
             stream.next_in = Z_NULL;
+
             codes = inflateInit(&stream);
-            if(codes != Z_OK) std::cout << codes << "\n";
+            assert(codes == Z_OK);
 
-            while(codes != Z_STREAM_END)
+            uncompresed_data.reserve(CHUNK + 1);
+            uncompresed_data.push_back('\0');
+
+            do
             {
-                codes = inflate(&stream, Z_NO_FLUSH);
-                switch(codes)
-                {
-                    case Z_NEED_DICT:
-                        std::cout << Z_DATA_ERROR << "\n dict \n"; break;
-                    case Z_DATA_ERROR:
-                        std::cout << Z_DATA_ERROR << "\n"; break;
-                    case Z_MEM_ERROR:
-                        inflateEnd(&stream);
-                        std::cout << "MEM ERR \n";
-                        break;
-                };
+                stream.avail_in = len;
+                stream.next_in = reinterpret_cast<unsigned char* >(data.data());
 
-                have = stream.avail_out;
-                uncompresed_data.push_back(have);
-            }
-            
+                do
+                {
+                    stream.next_out = buffer;
+                    stream.avail_out = CHUNK;
+
+                    codes = inflate(&stream, Z_NO_FLUSH);
+                    switch(codes)
+                    {
+                        case Z_NEED_DICT:
+                            std::cout << Z_DATA_ERROR << "\n dict \n"; break;
+                        case Z_DATA_ERROR:
+                            std::cout << Z_DATA_ERROR << "\n"; break;
+                        case Z_MEM_ERROR:
+                            inflateEnd(&stream);
+                            std::cout << "MEM ERR \n";
+                            break;
+                        case Z_STREAM_ERROR:
+                            std::cout << "Z_STREAM_ERROR \n";
+                    };
+
+                    have = CHUNK - stream.avail_out;
+                    // std::cout << have << "\n";
+                    //uncompresed_data.push_back(have);
+                } while (codes != Z_STREAM_END);
+            } while(stream.avail_out == 0);
            
+           for(int i=0;i<sizeof(buffer);++i){
+            std::cout << buffer[i] << " ";
+           };
+
+           std::string s;
+           std::cin >> s;
 
         };
 
@@ -304,7 +329,7 @@ class PNG
                     case 388: Chunks.make_pHYs(file, len); break;
                     case 290: Chunks.make_IDAT(file, len); break;  
                     case 288: Chunks.make_IEND(file, len); break;
-                    default: std::cout << "did not catch a chunk id \n"; throw;
+                    default: std::cout << "did not catch a chunk id \n";
                 };
             };
 
