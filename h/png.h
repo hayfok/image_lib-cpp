@@ -73,7 +73,6 @@ unsigned long little_to_big_endian(std::vector<int>& endian_buff)
 };
 
 
-
 class Chunks 
 {
 
@@ -225,7 +224,7 @@ class Chunks
             stream.zalloc = Z_NULL;
             stream.zfree = Z_NULL;
             stream.opaque = Z_NULL;
-            stream.avail_in = data[0];
+            stream.avail_in = len;
             stream.next_in = Z_NULL;
             codes = inflateInit(&stream);
             if(codes != Z_OK) std::cout << codes << "\n";
