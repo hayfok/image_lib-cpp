@@ -5,6 +5,7 @@
 * png home page             - http://www.libpng.org/pub/png/
 * inflate algo example      - https://github.com/madler/zlib/blob/master/contrib/puff/puff.c
 * inflate annotated code    - http://zlib.net/zlib_how.html
+*
 */
 
 #include "zlib.h"
@@ -54,7 +55,7 @@ void print_byte(char &c){ std::cout << c << "\n"; };
 // all bytes after the length up to the crc bytes
 void crc_32(std::ifstream &file)
 {
-    // doing nothing for now, need to impliment this
+    // impliment the zlib crc32 here
     for(int i { 4 }; i > 0; --i){ file.get(); };
 };
 
@@ -275,7 +276,7 @@ class PNG
         /* ihdr is the chunk that must follow the png header per the specification
         * 
         * we will issue a warning if this is not the case instead of throwing.
-        * if this warning is valid the decoder will operate with undefined behavior
+        * the code after this warning will run with undefined behavior.
         * 
         */
             if(id != 295) std::cout << 
@@ -287,7 +288,7 @@ class PNG
         /* main file decoder
         *
         * read all bytes from the file until the eof is reached.
-        * each case is the sum of individual ascii bytes parsed from the identity_chunk() function.
+        * each case is the sum of individual ascii bytes parsed from identity_chunk().
         * 
         */
             while(!file.eof())
@@ -329,8 +330,8 @@ class PNG
     
     /* function to identify the png header
     *
-    * this function will throw if the first 8 bytes of the file differ from the png header vec.
-    * this function is intended to only be ran once by the decoder
+    * this function will throw if the first 8 bytes of the file differ from PNG_SIG.
+    * this function is intended to only be ran once by the decoder.
     * 
     */
         void validate_header(std::ifstream &file)
@@ -344,7 +345,7 @@ class PNG
     /* function to identify chunks. 
     *
     * the id variable is the sum of all individual ascii bytes.
-    * the length is converted to big endian and needed for decoding
+    * the length is converted to big endian and needed for decoding.
     *
     */
         void identify_chunk(std::ifstream& file, unsigned long& len, unsigned long& id)
