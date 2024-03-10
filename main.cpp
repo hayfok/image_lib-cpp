@@ -1,14 +1,11 @@
 #include <iostream>
-#include <fstream>
 #include <string>
-#include <vector>
-#include <cassert>
 #include "./h/png.h"
 
 
 int main(){
 	
-    std::string filepath = "./images/red.png";
+    std::string filepath = "./images/red_png_small.png";
 
 	PNG image ( filepath );
    
