@@ -250,8 +250,9 @@ class Chunks
 
             // unsigned char buffer[CHUNK];
             //out.resize(this->png_height * this->png_width * 4 + this->png_height);
-            out.push_back('\0');
+            //out.push_back('\0');
             //out.reserve(CHUNK);
+            
            
             int codes               { }; // zlib return codes
             unsigned int have       { }; // number of bytes read
@@ -265,7 +266,7 @@ class Chunks
             stream.avail_in         = 0;
             stream.next_in          = Z_NULL;
 
-            codes = inflateInit(&stream);
+            codes = inflateInit(&stream);       
             assert(codes == Z_OK);
             int q = 0;
             unsigned long f = 0;

@@ -5,7 +5,7 @@
 
 int main(){
 	
-    std::string filepath = "./images/orange.png";
+    std::string filepath = "./images/red_png_small.png";
 
 	PNG image ( filepath );
    
