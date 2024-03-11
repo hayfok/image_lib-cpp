@@ -13,7 +13,17 @@
 #include <vector>
 #include <fstream>
 #include <cassert>
-#include <stack>
+
+
+#define IHDR 295;
+#define sRGB 334;
+#define gAMA 310;
+#define pHYs 388;
+#define IDAT 290;
+#define IEND 288;
+
+// recommended space allocation for inflate()
+#define CHUNK 16384
 
 /* recommended per the zlib documentation
 *
@@ -28,29 +38,6 @@
 // #  define SET_BINARY_MODE(file)
 // #endif
 
-
-struct CRC_TABLE 
-{
-    std::vector<unsigned long> t;
-    unsigned long c;
-
-    CRC_TABLE() 
-    {
-        for(int n { 256 }; n > 0; --n)
-        {
-            c = (unsigned long) n;
-            for(int k { }; k < 8; ++k)
-            {
-                // AUTODIN II polynomial
-                // 0xedb88320L
-                (c & 1) ? c = 0x04C11DBL ^ (c >> 1) : c = c >> 1;
-            };
-            t.push_back(c);
-        };
-    };
-
-} crc_table;
-
 // for debugging purposes, not intended to be used
 void print_byte(char &c){ std::cout << c << "\n"; };
 
@@ -61,7 +48,6 @@ void crc_32(std::ifstream& file)
     // impliment the zlib crc32 here
     for(int i { 4 }; i > 0; --i){ file.get(); };
 };
-
 
 
 /* endian swapper
@@ -114,7 +100,7 @@ class Chunks
         // 1 == meter
         unsigned char unit_specificer { };
     // IDAT values
-        std::vector< std::vector<Pixel> > pixels { };
+        std::vector< std::vector<Pixel> > image_matrix;
         std::vector<unsigned char> compresed_data { };
         std::vector<unsigned char> out { };
         //std::vector< std::vector<Pixel> > pixels { };
@@ -123,7 +109,7 @@ class Chunks
 
     // IHDR
     // 0x49 0x48 0x44 0x52
-        int make_ihdr(std::ifstream& file, unsigned long length)
+        int read_ihdr(std::ifstream& file, unsigned long length)
         {
           
             std::vector<int> endian_buff { };
@@ -163,7 +149,7 @@ class Chunks
 
     // SRGB
     // 0x73 0x52 0x47 0x42
-        int make_sRGB(std::ifstream &file, unsigned long &length)
+        int read_sRGB(std::ifstream &file, unsigned long &length)
         {
             this->rendering_intent = file.get(); --length;
 
@@ -176,7 +162,7 @@ class Chunks
 
     // GAMA
     // 0x67 0x41 0x4D 0x41
-        int make_gAMA(std::ifstream &file, unsigned long &length)
+        int read_gAMA(std::ifstream &file, unsigned long &length)
         {
             for(int i = 0; i < 4; ++i){ this->gamma = file.get(); --length; };
 
@@ -194,7 +180,7 @@ class Chunks
 
     // PHYS
     // 0x70 0x48 0x59 0x73
-        int make_pHYs(std::ifstream &file, unsigned long &length)
+        int read_pHYs(std::ifstream &file, unsigned long &length)
         {
             for(int i = 0; i < 4; ++i){ this->pixel_per_unit_x = file.get(); --length; };
             for(int i = 0; i < 4; ++i){ this->pixel_per_unit_y = file.get(); --length; };
@@ -210,7 +196,7 @@ class Chunks
 
     // IDAT
     // 0x49 0x44 0x54 0x78
-        int make_IDAT(std::ifstream& file, unsigned long& length)
+        int read_IDAT(std::ifstream& file, unsigned long& length)
         {
             unsigned int i;
             int err;
@@ -221,8 +207,19 @@ class Chunks
             err = inf(compresed_data, length, out);
             if(err) return 1;
 
-            err = make_pixels();
+            err = construct_image_matrix();
             if(err) return 1;
+
+            for(int w=0;w<this->png_width;++w)
+            {
+                for(int h=0;h<this->png_height;++h){
+                    std::cout << 
+                    image_matrix[w][h].R << " " <<
+                    image_matrix[w][h].G << " " <<
+                    image_matrix[w][h].B << " " <<
+                    image_matrix[w][h].A << " \n ";
+                }
+            }
 
             crc_32(file);
 
@@ -231,7 +228,7 @@ class Chunks
     
     // IEND
     // 0x49 0x45 0x4E 0x44
-        int make_IEND(std::ifstream& file, unsigned long& length)
+        int read_IEND(std::ifstream& file, unsigned long& length)
         {
             crc_32(file);
             // do nothing for now
@@ -241,7 +238,6 @@ class Chunks
 
 
     
-
     /* zlib inflation of compressed image data
     *
     * http://zlib.net/zlib_how.html
@@ -250,13 +246,12 @@ class Chunks
         int inf(std::vector<unsigned char>& data, unsigned long& len, std::vector<unsigned char>& out)
         {
 
-            // recommended space allocation for inflate()
-            #define CHUNK 16384
-
             //std::vector<unsigned char> b { };
 
             // unsigned char buffer[CHUNK];
-            out.reserve(this->png_height * this->png_width * 4 + this->png_height);
+            //out.resize(this->png_height * this->png_width * 4 + this->png_height);
+            out.push_back('\0');
+            //out.reserve(CHUNK);
            
             int codes               { }; // zlib return codes
             unsigned int have       { }; // number of bytes read
@@ -272,10 +267,11 @@ class Chunks
 
             codes = inflateInit(&stream);
             assert(codes == Z_OK);
-
+            int q = 0;
+            unsigned long f = 0;
             do
             {
-                stream.avail_in = len;
+                stream.avail_in = CHUNK;
                 stream.next_in = reinterpret_cast<unsigned char* >(data.data());
 
                 do
@@ -299,9 +295,15 @@ class Chunks
                         case Z_STREAM_ERROR:
                             std::cout << "Z_STREAM_ERROR \n"; 
                             return 1;
+                        case Z_BUF_ERROR:
+                            std::cout << "Z_BUFF_ERROR \n";
+                            return 1;
                     };
 
                     have = CHUNK - stream.avail_out;
+                    std::cout << out.back() << " last written byte \n";
+                    std::cout << (f += have) << " total bytes read \n";
+                    std::cout << out.size() << " elements in out \n ";
                  
                 } while (codes != Z_STREAM_END);
             } while(stream.avail_out == 0);
@@ -313,17 +315,18 @@ class Chunks
    
         };
 
-        int make_pixels()
+        int construct_image_matrix()
         {
          
             unsigned int l = out.capacity();
+            std::vector<Pixel> pixels { };
 
             int h, w, i;
             std::vector<unsigned int> t { };
             
             for(h=0;h<this->png_height;++h)
             {
-                for(w=1;w<this->png_width-1;++w)
+                for(w=0;w<this->png_width;++w)
                 {
                     int pos = 1;
                     for(i=0;i<4;++i)
@@ -338,11 +341,13 @@ class Chunks
                     p.B = t[2];
                     p.A = t[3];
                     
-                    t.clear();          
+                    t.clear(); 
+                    pixels.push_back(p);         
 
-                    pixels[w].push_back(p);
                     
                 };
+
+                image_matrix.push_back(pixels);
                 
             };
 
@@ -380,7 +385,7 @@ class PNG
             "WARNING! PNG header not followed by IDHR chunk" <<
             " - We're decoding a questionably encoded PNG \n";
 
-            Chunks.make_ihdr(file, len);
+            Chunks.read_ihdr(file, len);
 
         /* main file decoder
         *
@@ -397,11 +402,11 @@ class PNG
                 // it is a guarantee that the chunk is offset up to the first byte after the header
                 switch(id)
                 {
-                    case 334: { int err = Chunks.make_sRGB(file, len); if(!err) break; throw; }
-                    case 310: { int err = Chunks.make_gAMA(file, len); if(!err) break; throw; }
-                    case 388: { int err = Chunks.make_pHYs(file, len); if(!err) break; throw; }
-                    case 290: { int err = Chunks.make_IDAT(file, len); if(!err) break; throw; }
-                    case 288: { int err = Chunks.make_IEND(file, len); if(!err) break; throw; }
+                    case 334: { int err = Chunks.read_sRGB(file, len); if(!err) break; throw; }
+                    case 310: { int err = Chunks.read_gAMA(file, len); if(!err) break; throw; }
+                    case 388: { int err = Chunks.read_pHYs(file, len); if(!err) break; throw; }
+                    case 290: { int err = Chunks.read_IDAT(file, len); if(!err) break; throw; }
+                    case 288: { int err = Chunks.read_IEND(file, len); if(!err) break; throw; }
                     default: std::cout << "did not catch a chunk id \n";
                 };
             };
