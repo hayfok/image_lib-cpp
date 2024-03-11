@@ -5,6 +5,7 @@
 * png home page             - http://www.libpng.org/pub/png/
 * inflate algo example      - https://github.com/madler/zlib/blob/master/contrib/puff/puff.c
 * inflate annotated code    - http://zlib.net/zlib_how.html
+*
 */
 
 #include "zlib.h"
@@ -12,7 +13,17 @@
 #include <vector>
 #include <fstream>
 #include <cassert>
-#include <algorithm>
+
+
+#define IHDR 295;
+#define sRGB 334;
+#define gAMA 310;
+#define pHYs 388;
+#define IDAT 290;
+#define IEND 288;
+
+// recommended space allocation for inflate()
+#define CHUNK 16384
 
 /* recommended per the zlib documentation
 *
@@ -27,40 +38,16 @@
 // #  define SET_BINARY_MODE(file)
 // #endif
 
-
-struct CRC_TABLE 
-{
-    std::vector<unsigned long> t;
-    unsigned long c;
-
-    CRC_TABLE() 
-    {
-        for(int n { 256 }; n > 0; --n)
-        {
-            c = (unsigned long) n;
-            for(int k { }; k < 8; ++k)
-            {
-                // AUTODIN II polynomial
-                // 0xedb88320L
-                (c & 1) ? c = 0x04C11DBL ^ (c >> 1) : c = c >> 1;
-            };
-            t.push_back(c);
-        };
-    };
-
-} crc_table;
-
 // for debugging purposes, not intended to be used
 void print_byte(char &c){ std::cout << c << "\n"; };
 
 // 32 bit crc validation
 // all bytes after the length up to the crc bytes
-void crc_32(std::ifstream &file)
+void crc_32(std::ifstream& file)
 {
-    // doing nothing for now, need to impliment this
+    // impliment the zlib crc32 here
     for(int i { 4 }; i > 0; --i){ file.get(); };
 };
-
 
 
 /* endian swapper
@@ -80,6 +67,15 @@ class Chunks
 {
 
     public:
+
+        struct Pixel
+        {
+            unsigned char R;
+            unsigned char G;
+            unsigned char B;
+            unsigned char A;
+        };
+
     // IHDR values
         unsigned long png_width { };             // little endian
         unsigned long png_height { };            // little endian
@@ -104,12 +100,17 @@ class Chunks
         // 1 == meter
         unsigned char unit_specificer { };
     // IDAT values
-        std::vector<char> compresed_data { };
-        std::vector<char> uncompresed_data { };
+        std::vector< std::vector<unsigned char> > image_matrix;
+        std::vector<unsigned char> compresed_data { };
+        std::vector<unsigned char> out { };
+        std::vector<unsigned char> b { };
+        //std::vector< std::vector<Pixel> > pixels { };
+
+
 
     // IHDR
     // 0x49 0x48 0x44 0x52
-        void make_ihdr(std::ifstream& file, unsigned long length)
+        int read_ihdr(std::ifstream& file, unsigned long length)
         {
           
             std::vector<int> endian_buff { };
@@ -143,30 +144,34 @@ class Chunks
             if(length != 0) { std::cout << "file sync error: ihdr \n"; throw; };
 
             crc_32(file); // offsets files by 4 bytes
-        };
 
-    
+            return 0;
+        };
 
     // SRGB
     // 0x73 0x52 0x47 0x42
-        void make_sRGB(std::ifstream &file, unsigned long &length)
+        int read_sRGB(std::ifstream &file, unsigned long &length)
         {
             this->rendering_intent = file.get(); --length;
 
             if(length != 0) { std::cout << "file sync error: srgb \n"; throw; };
 
             crc_32(file); // offsets files by 4 bytes
+
+            return 0;
         };
 
     // GAMA
     // 0x67 0x41 0x4D 0x41
-        void make_gAMA(std::ifstream &file, unsigned long &length)
+        int read_gAMA(std::ifstream &file, unsigned long &length)
         {
             for(int i = 0; i < 4; ++i){ this->gamma = file.get(); --length; };
 
             if(length != 0) { std::cout << "file sync error: gama \n"; throw; };
 
             crc_32(file); // offsets files by 4 bytes
+
+            return 0;
         };
 
         void sample_gamma(){
@@ -176,7 +181,7 @@ class Chunks
 
     // PHYS
     // 0x70 0x48 0x59 0x73
-        void make_pHYs(std::ifstream &file, unsigned long &length)
+        int read_pHYs(std::ifstream &file, unsigned long &length)
         {
             for(int i = 0; i < 4; ++i){ this->pixel_per_unit_x = file.get(); --length; };
             for(int i = 0; i < 4; ++i){ this->pixel_per_unit_y = file.get(); --length; };
@@ -186,102 +191,164 @@ class Chunks
             if(length != 0) { std::cout << "file sync error: phys \n"; throw; };
 
             crc_32(file); // offsets files by 4 bytes
+
+            return 0;
         };
 
     // IDAT
     // 0x49 0x44 0x54 0x78
-        void make_IDAT(std::ifstream& file, unsigned long& length)
+        int read_IDAT(std::ifstream& file, unsigned long& length)
         {
-            unsigned long compressed_data_length = length;
+            unsigned int i;
+            int err;
+            //unsigned long compressed_data_length = length;
 
-            while (length != 0)
+            for(i=0;i<length;++i) this->compresed_data.push_back(file.get());
+        
+            err = inf(compresed_data, length, out);
+            if(err) return 1;
+
+
+            //for(int i=0;i<b.size();++i) std::cout << (int)b[i] << " ";
+            err = construct_image_matrix();
+            if(err) return 1;
+
+            for(int w=0;w<this->png_width;++w)
             {
-               this->compresed_data.push_back(file.get());
-                --length; 
-            };
+                for(int h=0;h<this->png_height;++h)
+                {
+                    std::cout << 
+                    (int)image_matrix[w][h] << " " <<
+                    (int)image_matrix[w][h] << " " <<
+                    (int)image_matrix[w][h] << " " <<
+                    (int)image_matrix[w][h] << " \n ";
+                }
+            }
 
-            inf(compresed_data, compressed_data_length, uncompresed_data);
+            crc_32(file);
 
-            std::cout << uncompresed_data.size();
-            //for(const char &b : uncompresed_data) { std::cout << b << " "; };
-
+            return 0;
         };
     
     // IEND
     // 0x49 0x45 0x4E 0x44
-        void make_IEND(std::ifstream& file, unsigned long& length)
+        int read_IEND(std::ifstream& file, unsigned long& length)
         {
+            crc_32(file);
             // do nothing for now
+
+            return 0;
         };
 
+
+    
     /* zlib inflation of compressed image data
     *
     * http://zlib.net/zlib_how.html
     * 
     */
-        void inf(std::vector<char>& data, unsigned long& len, std::vector<char>& uncompressed_data)
+        int inf(std::vector<unsigned char>& data, unsigned long& len, std::vector<unsigned char>& out)
         {
-            #define CHUNK 16384
 
-            int* buffer = new int[len];
-            //unsigned char buffer[len];
-
+            // unsigned char buffer[CHUNK];
+            out.resize(this->png_height * this->png_width * 4 + this->png_height);
+            //out.push_back('\0');
+            //out.reserve(CHUNK);
+           
             int codes               { }; // zlib return codes
             unsigned int have       { }; // number of bytes read
+            int r, c, i, j;
             z_stream stream;
-
-            stream.zalloc = Z_NULL;
-            stream.zfree = Z_NULL;
-            stream.opaque = Z_NULL;
-            stream.avail_in = 0;
-            stream.next_in = Z_NULL;
+         
+            stream.zalloc           = Z_NULL;
+            stream.zfree            = Z_NULL;
+            stream.opaque           = Z_NULL;
+            stream.avail_in         = 0;
+            stream.next_in          = Z_NULL;
 
             codes = inflateInit(&stream);
             assert(codes == Z_OK);
+            int q = 0;
+            unsigned long f = 0;
 
-            uncompresed_data.reserve(CHUNK + 1);
-            uncompresed_data.push_back('\0');
 
             do
             {
-                stream.avail_in = len;
-                //stream.next_in = reinterpret_cast<unsigned char* >(data.data());
-                stream.next_in = reinterpret_cast<Bytef*>(data.data());
+                stream.avail_in     = CHUNK;
+                stream.next_in      = reinterpret_cast<unsigned char* >(data.data());
 
                 do
                 {
-                    
-                    stream.avail_out = this->png_height;
-                    stream.next_out = (Bytef*)buffer;
+                    stream.avail_out    = CHUNK;
+                    stream.next_out     = reinterpret_cast<unsigned char* >(out.data());
 
                     codes = inflate(&stream, Z_NO_FLUSH);
+                    if(codes == Z_BUF_ERROR) return 0;
                     switch(codes)
                     {
                         case Z_NEED_DICT:
-                            std::cout << Z_DATA_ERROR << "\n dict \n"; break;
+                            std::cout << Z_DATA_ERROR << "\n dict \n"; 
+                            return 1;
                         case Z_DATA_ERROR:
-                            std::cout << Z_DATA_ERROR << "\n data_error"; break;
+                            std::cout << Z_DATA_ERROR << "\n"; 
+                            return 1;
                         case Z_MEM_ERROR:
                             inflateEnd(&stream);
                             std::cout << "MEM ERR \n";
-                            break;
+                            return 1;
                         case Z_STREAM_ERROR:
-                            std::cout << "Z_STREAM_ERROR \n";
+                            std::cout << "Z_STREAM_ERROR \n"; 
+                            return 1;
                     };
 
                     have = CHUNK - stream.avail_out;
-                    // unsigned long s = sizeof(buffer) / sizeof(buffer[0]);
-                    // uncompresed_data.insert(uncompresed_data.end(), buffer, buffer+s);
-                } while (stream.avail_out == 0);
-            } while(codes != Z_STREAM_END);
+
+                    for(int i=0;i<have;++i){ b.push_back(out[i]); };
+
+                    out.clear();
+                  
+                } while (codes != Z_STREAM_END);
+            } while(stream.avail_out == 0);
+        
+            // for(int k =0;k<have;++k) std::cout << (unsigned int)out[k] << " ";
+
+            return 0;
            
-        delete buffer;
-        std::string s;
-        std::cin >> s;
-        //    for(const auto &e : buffer) 
-        //    {
-        //     std::cout << e << " ";
-        //    }
+        };
+
+        int construct_image_matrix()
+        {
+         
+            unsigned int l = b.capacity();
+            std::vector<unsigned char> pixels { };
+
+            unsigned long a = 0;
+
+            unsigned long h, w, i;
+
+            // Pixel p;
+
+            h = w = i = 0;
+       
+            for(h=0;h<this->png_height;++h)
+            {
+                for(w=0;w<this->png_width;++w)
+                {
+                    unsigned long pos = 1;
+                    for(i=0;i<4;++i)
+                    {
+                        pixels.push_back(b[pos]);
+                        ++pos;
+                    };
+
+                };
+                // std::cout << ++a << "\n";
+                image_matrix.push_back(pixels);
+                
+            };
+
+            return 0;
+
         };
 
 } Chunks { };
@@ -307,19 +374,19 @@ class PNG
         /* ihdr is the chunk that must follow the png header per the specification
         * 
         * we will issue a warning if this is not the case instead of throwing.
-        * if this warning is valid the decoder will operate with undefined behavior
+        * the code after this warning will run with undefined behavior.
         * 
         */
             if(id != 295) std::cout << 
             "WARNING! PNG header not followed by IDHR chunk" <<
             " - We're decoding a questionably encoded PNG \n";
 
-            Chunks.make_ihdr(file, len);
+            Chunks.read_ihdr(file, len);
 
         /* main file decoder
         *
         * read all bytes from the file until the eof is reached.
-        * each case is the sum of individual ascii bytes parsed from the identity_chunk() function.
+        * each case is the sum of individual ascii bytes parsed from identity_chunk().
         * 
         */
             while(!file.eof())
@@ -331,11 +398,11 @@ class PNG
                 // it is a guarantee that the chunk is offset up to the first byte after the header
                 switch(id)
                 {
-                    case 334: Chunks.make_sRGB(file, len); break;
-                    case 310: Chunks.make_gAMA(file, len); break;
-                    case 388: Chunks.make_pHYs(file, len); break;
-                    case 290: Chunks.make_IDAT(file, len); break;  
-                    case 288: Chunks.make_IEND(file, len); break;
+                    case 334: { int err = Chunks.read_sRGB(file, len); if(!err) break; throw; }
+                    case 310: { int err = Chunks.read_gAMA(file, len); if(!err) break; throw; }
+                    case 388: { int err = Chunks.read_pHYs(file, len); if(!err) break; throw; }
+                    case 290: { int err = Chunks.read_IDAT(file, len); if(!err) break; throw; }
+                    case 288: { int err = Chunks.read_IEND(file, len); if(!err) break; throw; }
                     default: std::cout << "did not catch a chunk id \n";
                 };
             };
@@ -361,8 +428,8 @@ class PNG
     
     /* function to identify the png header
     *
-    * this function will throw if the first 8 bytes of the file differ from the png header vec.
-    * this function is intended to only be ran once by the decoder
+    * this function will throw if the first 8 bytes of the file differ from PNG_SIG.
+    * this function is intended to only be ran once by the decoder.
     * 
     */
         void validate_header(std::ifstream &file)
@@ -376,7 +443,7 @@ class PNG
     /* function to identify chunks. 
     *
     * the id variable is the sum of all individual ascii bytes.
-    * the length is converted to big endian and needed for decoding
+    * the length is converted to big endian and needed for decoding.
     *
     */
         void identify_chunk(std::ifstream& file, unsigned long& len, unsigned long& id)
