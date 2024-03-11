@@ -8,7 +8,7 @@
 
 int main(){
 	
-    std::string filepath = "./images/red.png";
+    std::string filepath = "./images/blue.png";
 
 	PNG image ( filepath );
    

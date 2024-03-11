@@ -12,6 +12,7 @@
 #include <vector>
 #include <fstream>
 #include <cassert>
+#include <algorithm>
 
 /* recommended per the zlib documentation
 *
@@ -200,6 +201,10 @@ class Chunks
             };
 
             inf(compresed_data, compressed_data_length, uncompresed_data);
+
+            std::cout << uncompresed_data.size();
+            //for(const char &b : uncompresed_data) { std::cout << b << " "; };
+
         };
     
     // IEND
@@ -218,12 +223,12 @@ class Chunks
         {
             #define CHUNK 16384
 
-            unsigned char buffer[CHUNK];
+            int* buffer = new int[len];
+            //unsigned char buffer[len];
 
             int codes               { }; // zlib return codes
             unsigned int have       { }; // number of bytes read
             z_stream stream;
-            std::vector<char> out   { };
 
             stream.zalloc = Z_NULL;
             stream.zfree = Z_NULL;
@@ -240,12 +245,14 @@ class Chunks
             do
             {
                 stream.avail_in = len;
-                stream.next_in = reinterpret_cast<unsigned char* >(data.data());
+                //stream.next_in = reinterpret_cast<unsigned char* >(data.data());
+                stream.next_in = reinterpret_cast<Bytef*>(data.data());
 
                 do
                 {
-                    stream.next_out = buffer;
-                    stream.avail_out = CHUNK;
+                    
+                    stream.avail_out = this->png_height;
+                    stream.next_out = (Bytef*)buffer;
 
                     codes = inflate(&stream, Z_NO_FLUSH);
                     switch(codes)
@@ -253,7 +260,7 @@ class Chunks
                         case Z_NEED_DICT:
                             std::cout << Z_DATA_ERROR << "\n dict \n"; break;
                         case Z_DATA_ERROR:
-                            std::cout << Z_DATA_ERROR << "\n"; break;
+                            std::cout << Z_DATA_ERROR << "\n data_error"; break;
                         case Z_MEM_ERROR:
                             inflateEnd(&stream);
                             std::cout << "MEM ERR \n";
@@ -263,18 +270,18 @@ class Chunks
                     };
 
                     have = CHUNK - stream.avail_out;
-                    // std::cout << have << "\n";
-                    //uncompresed_data.push_back(have);
-                } while (codes != Z_STREAM_END);
-            } while(stream.avail_out == 0);
+                    // unsigned long s = sizeof(buffer) / sizeof(buffer[0]);
+                    // uncompresed_data.insert(uncompresed_data.end(), buffer, buffer+s);
+                } while (stream.avail_out == 0);
+            } while(codes != Z_STREAM_END);
            
-           for(int i=0;i<sizeof(buffer);++i){
-            std::cout << buffer[i] << " ";
-           };
-
-           std::string s;
-           std::cin >> s;
-
+        delete buffer;
+        std::string s;
+        std::cin >> s;
+        //    for(const auto &e : buffer) 
+        //    {
+        //     std::cout << e << " ";
+        //    }
         };
 
 } Chunks { };
