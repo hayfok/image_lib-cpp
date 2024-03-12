@@ -27,7 +27,6 @@
 
 /* recommended per the zlib documentation
 *
-* todo: look into why this is important before implimenting
 *
 */
 // #if defined(MSDOS) || defined(OS2) || defined(WIN32) || defined(__CYGWIN__)
@@ -37,9 +36,6 @@
 // #else
 // #  define SET_BINARY_MODE(file)
 // #endif
-
-// for debugging purposes, not intended to be used
-void print_byte(char &c){ std::cout << c << "\n"; };
 
 // 32 bit crc validation
 // all bytes after the length up to the crc bytes
@@ -89,7 +85,7 @@ class Chunks
         // 1 == Relative Colorimetric
         // 2 == Saturation
         // 3 == Absolute Colorimetric
-        char rendering_intent { };
+        unsigned char rendering_intent { };
     // gAMA values
         unsigned long gamma { };
     // pHYs values
@@ -100,7 +96,7 @@ class Chunks
         // 1 == meter
         unsigned char unit_specificer { };
     // IDAT values
-        std::vector< std::vector<unsigned char> > image_matrix;
+        std::vector< std::vector<Pixel> > image_matrix;
         std::vector<unsigned char> compresed_data { };
         std::vector<unsigned char> out { };
         std::vector<unsigned char> b { };
@@ -218,12 +214,12 @@ class Chunks
                 for(int h=0;h<this->png_height;++h)
                 {
                     std::cout << 
-                    (int)image_matrix[w][h] << " " <<
-                    (int)image_matrix[w][h] << " " <<
-                    (int)image_matrix[w][h] << " " <<
-                    (int)image_matrix[w][h] << " \n ";
-                }
-            }
+                    (int)image_matrix[w][h].R << " " <<
+                    (int)image_matrix[w][h].G << " " <<
+                    (int)image_matrix[w][h].B << " " <<
+                    (int)image_matrix[w][h].A << " \n ";
+                };
+            };
 
             crc_32(file);
 
@@ -283,7 +279,8 @@ class Chunks
                     stream.next_out     = reinterpret_cast<unsigned char* >(out.data());
 
                     codes = inflate(&stream, Z_NO_FLUSH);
-                    if(codes == Z_BUF_ERROR) return 0;
+                    if(codes == Z_BUF_ERROR) return 0; // not sure if this is a good idea or not
+
                     switch(codes)
                     {
                         case Z_NEED_DICT:
@@ -310,8 +307,6 @@ class Chunks
                 } while (codes != Z_STREAM_END);
             } while(stream.avail_out == 0);
         
-            // for(int k =0;k<have;++k) std::cout << (unsigned int)out[k] << " ";
-
             return 0;
            
         };
@@ -320,30 +315,32 @@ class Chunks
         {
          
             unsigned int l = b.capacity();
-            std::vector<unsigned char> pixels { };
-
-            unsigned long a = 0;
+            std::vector<Pixel> pixels { };
 
             unsigned long h, w, i;
-
-            // Pixel p;
-
             h = w = i = 0;
-       
+
+            Pixel p;
+
+            unsigned long pos = 0;
+
             for(h=0;h<this->png_height;++h)
             {
+                ++pos;
                 for(w=0;w<this->png_width;++w)
                 {
-                    unsigned long pos = 1;
-                    for(i=0;i<4;++i)
-                    {
-                        pixels.push_back(b[pos]);
-                        ++pos;
-                    };
+                    if(pos > l) return 0;
+                    p.R = b[pos]; ++pos;
+                    p.G = b[pos]; ++pos;
+                    p.B = b[pos]; ++pos;
+                    p.A = b[pos]; ++pos;
+
+                    pixels.push_back(p);
 
                 };
-                // std::cout << ++a << "\n";
+                
                 image_matrix.push_back(pixels);
+                pixels.clear();
                 
             };
 
