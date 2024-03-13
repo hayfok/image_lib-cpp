@@ -70,10 +70,10 @@ class Chunks
 
         struct Pixel
         {
-            int R;
-            int G;
-            int B;
-            int A;
+            unsigned char R;
+            unsigned char G;
+            unsigned char B;
+            unsigned char A;
         };
 
     // IHDR values
@@ -100,9 +100,10 @@ class Chunks
         // 1 == meter
         unsigned char unit_specificer { };
     // IDAT values
-        std::vector< std::vector<Pixel> > image_matrix;
+        std::vector< std::vector<Pixel > >* image_matrix = new std::vector< std::vector<Pixel> >;
         std::vector<unsigned char> compresed_data { };
         std::vector<unsigned char> out { };
+        std::vector<unsigned char> b { };
         //std::vector< std::vector<Pixel> > pixels { };
 
 
@@ -207,19 +208,21 @@ class Chunks
             err = inf(compresed_data, length, out);
             if(err) return 1;
 
+
+            //for(int i=0;i<b.size();++i) std::cout << (int)b[i] << " ";
             err = construct_image_matrix();
             if(err) return 1;
 
-            for(int w=0;w<this->png_width;++w)
-            {
-                for(int h=0;h<this->png_height;++h){
-                    std::cout << 
-                    image_matrix[w][h].R << " " <<
-                    image_matrix[w][h].G << " " <<
-                    image_matrix[w][h].B << " " <<
-                    image_matrix[w][h].A << " \n ";
-                }
-            }
+            
+            
+            // for(int w=0;w<this->png_width;++w)
+            // {
+            //     for(int h=0;h<this->png_height;++h)
+            //     {
+            //         //
+        
+            //     };
+            // }
 
             crc_32(file);
 
@@ -246,10 +249,8 @@ class Chunks
         int inf(std::vector<unsigned char>& data, unsigned long& len, std::vector<unsigned char>& out)
         {
 
-            //std::vector<unsigned char> b { };
-
             // unsigned char buffer[CHUNK];
-            //out.resize(this->png_height * this->png_width * 4 + this->png_height);
+            out.resize(this->png_height * this->png_width * 4 + this->png_height);
             //out.push_back('\0');
             //out.reserve(CHUNK);
             
@@ -262,7 +263,6 @@ class Chunks
             stream.zalloc           = Z_NULL;
             stream.zfree            = Z_NULL;
             stream.opaque           = Z_NULL;
-            stream.avail_in         = len;
             stream.avail_in         = 0;
             stream.next_in          = Z_NULL;
 
@@ -270,17 +270,20 @@ class Chunks
             assert(codes == Z_OK);
             int q = 0;
             unsigned long f = 0;
+
+
             do
             {
-                stream.avail_in = CHUNK;
-                stream.next_in = reinterpret_cast<unsigned char* >(data.data());
+                stream.avail_in     = CHUNK;
+                stream.next_in      = reinterpret_cast<unsigned char* >(data.data());
 
                 do
                 {
-                    stream.next_out = reinterpret_cast<unsigned char* >(out.data());
-                    stream.avail_out = CHUNK;
+                    stream.avail_out    = CHUNK;
+                    stream.next_out     = reinterpret_cast<unsigned char* >(out.data());
 
                     codes = inflate(&stream, Z_NO_FLUSH);
+                    if(codes == Z_BUF_ERROR) return 0;
                     switch(codes)
                     {
                         case Z_NEED_DICT:
@@ -296,16 +299,14 @@ class Chunks
                         case Z_STREAM_ERROR:
                             std::cout << "Z_STREAM_ERROR \n"; 
                             return 1;
-                        case Z_BUF_ERROR:
-                            std::cout << "Z_BUFF_ERROR \n";
-                            return 1;
                     };
 
                     have = CHUNK - stream.avail_out;
-                    std::cout << out.back() << " last written byte \n";
-                    std::cout << (f += have) << " total bytes read \n";
-                    std::cout << out.size() << " elements in out \n ";
-                 
+
+                    for(int i=0;i<have;++i){ b.push_back(out[i]); };
+
+                    out.clear();
+                  
                 } while (codes != Z_STREAM_END);
             } while(stream.avail_out == 0);
         
@@ -313,42 +314,40 @@ class Chunks
 
             return 0;
            
-   
         };
 
         int construct_image_matrix()
         {
          
-            unsigned int l = out.capacity();
+            unsigned int l = b.capacity();
             std::vector<Pixel> pixels { };
 
-            int h, w, i;
-            std::vector<unsigned int> t { };
-            
+            unsigned long a = 0;
+
+            unsigned long h, w, i;
+
+            Pixel p;
+
+            h = w = i = 0;
+       
             for(h=0;h<this->png_height;++h)
             {
                 for(w=0;w<this->png_width;++w)
                 {
-                    int pos = 1;
-                    for(i=0;i<4;++i)
-                    {
-                        t.push_back(out[pos]);
-                        ++pos;
-                    };
-
-                    Pixel p;
-                    p.R = t[0];
-                    p.G = t[1];
-                    p.B = t[2];
-                    p.A = t[3];
+                    unsigned long pos = 1;
                     
-                    t.clear(); 
-                    pixels.push_back(p);         
-
+                        p.R = b[pos]; ++pos;
+                        p.G = b[pos]; ++pos;
+                        p.B = b[pos]; ++pos;
+                        p.A = b[pos]; ++pos;
+                        // pixels.push_back(b[pos]);
+                        //++pos;
                     
+                    pixels.push_back(p);
+                
                 };
-
-                image_matrix.push_back(pixels);
+                // std::cout << ++a << "\n";
+                image_matrix->push_back(pixels);
                 
             };
 
