@@ -5,14 +5,15 @@
 
 int main(){
 	
-    std::string filepath = "./images/red.png";
+    std::string filepath        = "./images/orange.png";
+    std::string new_filepath    = "./images/orange_copy.png";
 
 	PNG image ( filepath );
    
-    unsigned long h = image.height();
-    unsigned long w = image.width();
+    image.print_ihdr();
+    //image.print_pixels();
 
-    std::cout << w << "\n" << h << "\n";
+    
 
 	return 0;
 };
