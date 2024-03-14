@@ -19,8 +19,7 @@
 #include <fstream>
 #include <cassert>
 
-
-// recommended space allocation for inflate() efficiency
+ // recommended space allocation for inflate() efficiency
 #define CHUNK 16384
 
 /* recommended per the zlib documentation
@@ -66,42 +65,45 @@ class Chunks
         { unsigned char R, G, B, A; };
 
     // IHDR values
-        unsigned long png_width         = 0;            // little endian
-        unsigned long png_height        = 0;            // little endian
-        unsigned char b_depth           = 0;            // valid values 1, 2, 4, 8, 16
-        unsigned char color_type        = 0;            // valid values 0, 2, 3, 4, 6
-        unsigned char comp_method       = 0;            // should be 0 for standard
-        unsigned char filter_method     = 0;            // should be 0 for standard
-        unsigned char interlace_method  = 0;            // 0 == no interlace, 1 == Adam7
+        unsigned int png_width              = 0;            // little endian
+        unsigned int png_height             = 0;            // little endian
+        unsigned char b_depth               = 0;            // valid values 1, 2, 4, 8, 16
+        unsigned char color_type            = 0;            // valid values 0, 2, 3, 4, 6
+        unsigned char comp_method           = 0;            // should be 0 for standard
+        unsigned char filter_method         = 0;            // should be 0 for standard
+        unsigned char interlace_method      = 0;            // 0 == no interlace, 1 == Adam7
 
         // 1 == alpha channel
         // 0 == no alpha channel
-        unsigned char alpha_flag        = 0; 
+        unsigned char alpha_flag            = 0; 
     // sRGB values
         // 0 == Perceptual
         // 1 == Relative Colorimetric
         // 2 == Saturation
         // 3 == Absolute Colorimetric
-        unsigned char rendering_intent  = 0;;
+        unsigned char rendering_intent      = 0;
     // gAMA values
-        unsigned long gamma { };
+        unsigned long gamma                 = 0;
     // pHYs values
-        unsigned long pixel_per_unit_x  = 0;
-        unsigned long pixel_per_unit_y  = 0;
-
+        unsigned long pixel_per_unit_x      = 0;
+        unsigned long pixel_per_unit_y      = 0;
         // 0 == unknown
         // 1 == meter
-        unsigned char unit_specificer   = 0;
+        unsigned char unit_specificer       = 0;
+    //PLTE values
+        std::vector<unsigned char> palate                                   { };
+        std::vector< std::vector<unsigned char> > indexed_matrix            { };
     // IDAT values
-        std::vector< std::vector<Pixel> > image_matrix;
-        std::vector<unsigned char> compresed_data { };
-        std::vector<unsigned char> out { };
-        std::vector<unsigned char> b { };
+        std::vector< std::vector<Pixel> > truecolor_matrix                  { };
+        std::vector<unsigned char> compresed_data                           { };
+        std::vector<unsigned char> out                                      { };
+        std::vector<unsigned char> b                                        { };
+        unsigned long len                   = 0;
         //std::vector< std::vector<Pixel> > pixels { };
 
     // IHDR
     // 0x49 0x48 0x44 0x52
-        int read_ihdr(std::ifstream& file, unsigned long length)
+        int read_ihdr(std::ifstream& file, unsigned long &length)
         {
           
             std::vector<int> endian_buff { };
@@ -155,6 +157,35 @@ class Chunks
             return 0;
         };
 
+    // PLTE
+    // 0x50 0x4C 0x54 0x45
+        int read_PLTE(std::ifstream &file, unsigned long &length)
+        {
+            unsigned long len = length;
+            if(!length % 3) { std::cout << "PLTE not divisible by 3. \n"; return 1; };
+
+            palate.resize(len / 3);
+
+            for(int i=0;i<len;++i)
+            {
+                if(i % 3 == 0) 
+                {
+                    palate.push_back(file.get());
+                    --length;
+                }
+                else
+                {
+                    file.ignore();
+                    --length;
+                }
+            }
+
+            crc_32(file); // offsets files by 4 bytes
+
+            return 0;
+           
+        };
+
     // GAMA
     // 0x67 0x41 0x4D 0x41
         int read_gAMA(std::ifstream &file, unsigned long &length)
@@ -195,6 +226,8 @@ class Chunks
         {
             unsigned int i;
             unsigned int err;
+
+            unsigned long len = length;
          
             for(i=0;i<length;++i) this->compresed_data.push_back(file.get());
         
@@ -219,8 +252,6 @@ class Chunks
             return 0;
         };
 
-
-    
     /* zlib inflation of compressed image data
     *
     * http://zlib.net/zlib_how.html
@@ -229,11 +260,11 @@ class Chunks
         int inf(std::vector<unsigned char>& data, unsigned long& len, std::vector<unsigned char>& out)
         {
 
-            out.resize(this->png_height * this->png_width * 4 + this->png_height);
+            out.resize(CHUNK);
           
-            int codes               { }; // zlib return codes
-            unsigned int have       { }; // number of bytes read
-            int r, c, i, j;
+            int codes               = 0; // zlib return codes
+            unsigned int have       = 0; // number of bytes read
+      
             z_stream stream;
          
             stream.zalloc           = Z_NULL;
@@ -244,10 +275,7 @@ class Chunks
 
             codes = inflateInit(&stream);       
             assert(codes == Z_OK);
-            int q = 0;
-            unsigned long f = 0;
-
-
+        
             do
             {
                 stream.avail_in     = CHUNK;
@@ -280,6 +308,11 @@ class Chunks
 
                     have = CHUNK - stream.avail_out;
 
+                    /*
+                    * i dont need to be doing this, but it is working for now.
+                    * don't write to the buffer, but just to out directly.
+                    * i was having issues with zlib when doing this before.
+                    */
                     for(int i=0;i<have;++i){ b.push_back(out[i]); };
 
                     out.clear();
@@ -291,47 +324,110 @@ class Chunks
            
         };
 
-        // alpha flag == 1
-        void RGBA(Pixel& p, unsigned int& pos)
+    // 
+        void RGBA(
+            Pixel& p, 
+            unsigned long& h, 
+            unsigned long& w, 
+            unsigned long pos, 
+            unsigned int& l,
+            std::vector<Pixel>& pixels
+        )
         {
-            p.R = b[pos]; ++pos;
-            p.G = b[pos]; ++pos;
-            p.B = b[pos]; ++pos;
-            if(!this->alpha_flag) { p.A = b[pos]; ++pos; };
+            for(h=0;h<this->png_height;++h)
+            {
+                ++pos; // skip the filter byte on each scanline
+                if(pos > l) break;
+
+                for(w=0;w<this->png_width;++w)
+                {
+                    p.R = b[pos]; ++pos;
+                    p.G = b[pos]; ++pos;
+                    p.B = b[pos]; ++pos;
+                    if(!this->alpha_flag) { p.A = b[pos]; ++pos; };
+
+                    pixels.push_back(p);
+                };
+                
+                truecolor_matrix.push_back(pixels);
+                pixels.clear();
+                
+            };
+
+            
+            // p.R = b[pos]; ++pos;
+            // p.G = b[pos]; ++pos;
+            // p.B = b[pos]; ++pos;
+            // if(!this->alpha_flag) { p.A = b[pos]; ++pos; };
         }
 
+
+        void PLTE_RGBA(
+            unsigned long& h, 
+            unsigned long& w, 
+            unsigned long pos, 
+            unsigned int& l, 
+            std::vector<unsigned char>& plte_pixels
+        )
+        {
+            for(h;h<this->png_height;++h)
+            {
+                ++pos; // skip the filter byte on each scanline
+                if(pos > l) break;
+
+                for(w;w<this->png_height;++w)
+                {
+                    plte_pixels.push_back(palate[pos]);
+                };
+
+                indexed_matrix.push_back(plte_pixels);
+                plte_pixels.clear();
+            }
+        }
+
+    // 
         int construct_image_matrix()
         {
          
             unsigned int l = b.capacity();
-            std::vector<Pixel> pixels { };
 
-            unsigned long h, w, i;
-            h = w = i = 0;
+            std::vector<Pixel> pixels                   { };
+            std::vector<unsigned char> plte_pixels      { };
 
+            unsigned long h, w, pos; h = w = pos = 0;
+            unsigned char err;
            
-            
             Pixel p;
 
-            unsigned int pos = 0;
 
-            for(h=0;h<this->png_height;++h)
+            if(!palate.empty()) 
             {
-                ++pos;
-                for(w=0;w<this->png_width;++w)
-                {
-                    if(pos > l) return 0;
+                PLTE_RGBA(h,w,pos,l, plte_pixels);
+                return 0;
+            }
+            else
+            {
+                RGBA(p,h,w,pos,l,pixels);
+                return 0;
+            }
+            // if()
 
-                    RGBA(p, pos);
+            // for(h=0;h<this->png_height;++h)
+            // {
+            //     ++pos; // skip the filter byte on each scanline
+            //     if(pos > l) return 0;
 
-                    pixels.push_back(p);
-
-                };
+            //     for(w=0;w<this->png_width;++w)
+            //     {
+            //         if(!palate.empty())
+            //         RGBA(p, pos);
+            //         pixels.push_back(p);
+            //     };
                 
-                image_matrix.push_back(pixels);
-                pixels.clear();
+            //     truecolor_matrix.push_back(pixels);
+            //     pixels.clear();
                 
-            };
+            // };
 
             return 0;
 
@@ -344,6 +440,17 @@ class PNG
 {
     private:
 
+        enum chunk_values
+        {
+            IEND = 288,
+            IDAT = 290,
+            IHDR = 295,
+            PLTE = 309,
+            gAMA = 310,
+            sRGB = 334,
+            pHYs = 388,
+        };
+
         void read_bytes(std::string &filepath)
         {
             std::ifstream file { filepath, std::ios_base::binary | std::ios_base::in }; 
@@ -352,14 +459,6 @@ class PNG
             unsigned long len, id; len = id = 0;
             int err = 0;
 
-            #define IEND 288
-            #define IDAT 290
-            #define IHDR 295
-            #define PLTE 309
-            #define gAMA 310
-            #define sRGB 334
-            #define pHYs 388
-         
             validate_header(file); // offsets file reader by 8 bytes, only called once
 
             identify_chunk(file, len, id); // offsets file reader by 8 bytes on every call
@@ -396,8 +495,9 @@ class PNG
                 {
                     case sRGB: { err = Chunks.read_sRGB(file, len); if(!err) break; throw; }
                     case gAMA: { err = Chunks.read_gAMA(file, len); if(!err) break; throw; }
+                    case PLTE: { err = Chunks.read_PLTE(file, len); if(!err) break; throw; }
                     case pHYs: { err = Chunks.read_pHYs(file, len); if(!err) break; throw; }
-                    case IDAT: { err = Chunks.read_IDAT(file, len); if(!err) break; throw; }
+                    case IDAT: { err = Chunks.read_IDAT(file, len); if(!err) break; throw; } // need to consider continous idat blocks
                     case IEND: { err = Chunks.read_IEND(file, len); if(!err) break; throw; }
                     //default: std::cout << "did not catch a chunk id \n";
                 };
@@ -436,13 +536,13 @@ class PNG
         void print_ihdr()
         {
             std::cout <<
-            "length             :   " << (int)Chunks.png_width           << "\n" <<
-            "width              :   " << (int)Chunks.png_height          << "\n" <<
-            "bit_depth          :   " << (int)Chunks.b_depth             << "\n" <<
-            "color type         :   " << (int)Chunks.color_type          << "\n" <<
-            "compression method :   " << (int)Chunks.comp_method         << "\n" <<
-            "filter method      :   " << (int)Chunks.filter_method       << "\n" <<
-            "interlace method   :   " << (int)Chunks.interlace_method    << "\n" ;
+            "length             :   " << (int)Chunks.png_width              << "\n" <<
+            "width              :   " << (int)Chunks.png_height             << "\n" <<
+            "bit_depth          :   " << (int)Chunks.b_depth                << "\n" <<
+            "color type         :   " << (int)Chunks.color_type             << "\n" <<
+            "compression method :   " << (int)Chunks.comp_method            << "\n" <<
+            "filter method      :   " << (int)Chunks.filter_method          << "\n" <<
+            "interlace method   :   " << (int)Chunks.interlace_method       << "\n";
         };
        
 
@@ -452,17 +552,34 @@ class PNG
             unsigned long w, h;
             h = w = 0;
 
-            for(int w=0;w<Chunks.png_width;++w)
+            if(!Chunks.truecolor_matrix.empty())
             {
-                for(int h=0;h<Chunks.png_height;++h)
+                for(int w=0;w<Chunks.png_width;++w)
                 {
-                    
-                    std::cout << 
-                    (int)Chunks.image_matrix[w][h].R << " " <<
-                    (int)Chunks.image_matrix[w][h].G << " " <<
-                    (int)Chunks.image_matrix[w][h].B << " " <<
-                    (int)Chunks.image_matrix[w][h].A << " \n ";
-                    
+                    for(int h=0;h<Chunks.png_height;++h)
+                    {
+                        
+                        std::cout << 
+                        (int)Chunks.truecolor_matrix[w][h].R << " " <<
+                        (int)Chunks.truecolor_matrix[w][h].G << " " <<
+                        (int)Chunks.truecolor_matrix[w][h].B << " " <<
+                        (int)Chunks.truecolor_matrix[w][h].A << " \n ";
+                        
+                    };
+                };
+            };
+
+            if(!Chunks.indexed_matrix.empty())
+            {
+                for(int w=0;w<Chunks.png_width;++w)
+                {
+                    for(int h=0;h<Chunks.png_height;++h)
+                    {
+                        
+                        //std::cout << 
+                        //(int)Chunks.indexed_matrix[w][h] << " ";
+                        
+                    };
                 };
             };
 
