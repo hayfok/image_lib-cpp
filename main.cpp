@@ -11,7 +11,7 @@ int main(){
 	PNG image ( filepath );
    
     image.print_ihdr();
-    //image.print_pixels();
+    image.print_pixels();
     image.write_file( new_filepath );
     
 
