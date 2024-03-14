@@ -15,9 +15,11 @@
 
 #include "zlib.h"
 #include "zconf.h"
+//#include "crc32.h"
 #include <vector>
 #include <fstream>
 #include <cassert>
+#include <map>
 
  // recommended space allocation for inflate() efficiency
 #define CHUNK 16384
@@ -63,6 +65,14 @@ class Chunks
 
         struct Pixel
         { unsigned char R, G, B, A; };
+
+        std::map<std::string, unsigned char> chunk_flags 
+        {
+            { "sRGB", 0 },
+            { "PLTE", 0 },
+            { "gAMA", 0 },
+            { "pHYs", 0 }
+        };
 
     // IHDR values
         unsigned int png_width              = 0;            // little endian
@@ -147,7 +157,9 @@ class Chunks
     // 0x73 0x52 0x47 0x42
         int read_sRGB(std::ifstream &file, unsigned long &length)
         {
-            
+
+            chunk_flags["sRGB"] = 1;
+
             this->rendering_intent = file.get(); --length;
 
             if(length != 0) { std::cout << "file sync error: srgb \n"; throw; };
@@ -155,12 +167,16 @@ class Chunks
             crc_32(file); // offsets files by 4 bytes
 
             return 0;
+
         };
 
     // PLTE
     // 0x50 0x4C 0x54 0x45
         int read_PLTE(std::ifstream &file, unsigned long &length)
         {
+
+            chunk_flags["PLTE"] = 1;
+
             unsigned long len = length;
             if(!length % 3) { std::cout << "PLTE not divisible by 3. \n"; return 1; };
 
@@ -190,6 +206,9 @@ class Chunks
     // 0x67 0x41 0x4D 0x41
         int read_gAMA(std::ifstream &file, unsigned long &length)
         {
+
+            chunk_flags["gAMA"] = 1;
+
             for(int i = 0; i < 4; ++i){ this->gamma = file.get(); --length; };
 
             if(length != 0) { std::cout << "file sync error: gama \n"; throw; };
@@ -197,6 +216,7 @@ class Chunks
             crc_32(file); // offsets files by 4 bytes
 
             return 0;
+
         };
 
         void sample_gamma(){
@@ -208,6 +228,9 @@ class Chunks
     // 0x70 0x48 0x59 0x73
         int read_pHYs(std::ifstream &file, unsigned long &length)
         {
+
+            chunk_flags["pHYs"] = 1;
+
             for(int i = 0; i < 4; ++i){ this->pixel_per_unit_x = file.get(); --length; };
             for(int i = 0; i < 4; ++i){ this->pixel_per_unit_y = file.get(); --length; };
 
@@ -218,6 +241,7 @@ class Chunks
             crc_32(file); // offsets files by 4 bytes
 
             return 0;
+
         };
 
     // IDAT
@@ -308,11 +332,6 @@ class Chunks
 
                     have = CHUNK - stream.avail_out;
 
-                    /*
-                    * i dont need to be doing this, but it is working for now.
-                    * don't write to the buffer, but just to out directly.
-                    * i was having issues with zlib when doing this before.
-                    */
                     for(int i=0;i<have;++i){ b.push_back(out[i]); };
 
                     out.clear();
@@ -354,14 +373,9 @@ class Chunks
                 
             };
 
-            
-            // p.R = b[pos]; ++pos;
-            // p.G = b[pos]; ++pos;
-            // p.B = b[pos]; ++pos;
-            // if(!this->alpha_flag) { p.A = b[pos]; ++pos; };
-        }
+        };
 
-
+    // 
         void PLTE_RGBA(
             unsigned long& h, 
             unsigned long& w, 
@@ -389,7 +403,7 @@ class Chunks
         int construct_image_matrix()
         {
          
-            unsigned int l = b.capacity();
+            unsigned int l = b.size();
 
             std::vector<Pixel> pixels                   { };
             std::vector<unsigned char> plte_pixels      { };
@@ -410,25 +424,7 @@ class Chunks
                 RGBA(p,h,w,pos,l,pixels);
                 return 0;
             }
-            // if()
-
-            // for(h=0;h<this->png_height;++h)
-            // {
-            //     ++pos; // skip the filter byte on each scanline
-            //     if(pos > l) return 0;
-
-            //     for(w=0;w<this->png_width;++w)
-            //     {
-            //         if(!palate.empty())
-            //         RGBA(p, pos);
-            //         pixels.push_back(p);
-            //     };
-                
-            //     truecolor_matrix.push_back(pixels);
-            //     pixels.clear();
-                
-            // };
-
+ 
             return 0;
 
         };
