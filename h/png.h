@@ -6,6 +6,11 @@
 * inflate algo example      - https://github.com/madler/zlib/blob/master/contrib/puff/puff.c
 * inflate annotated code    - http://zlib.net/zlib_how.html
 *
+* todo:
+* change longs to ints where appropriate and dont support images of len/ height == 4 billion
+* impliment zlib crc
+* finish all chunks per spec
+* figure out IEND bug
 */
 
 #include "zlib.h"
@@ -22,24 +27,20 @@
 #define IDAT 290;
 #define IEND 288;
 
-// recommended space allocation for inflate()
+// recommended space allocation for inflate() efficiency
 #define CHUNK 16384
 
 /* recommended per the zlib documentation
 *
-* todo: look into why this is important before implimenting
 *
 */
-// #if defined(MSDOS) || defined(OS2) || defined(WIN32) || defined(__CYGWIN__)
-// #  include <fcntl.h>
-// #  include <io.h>
-// #  define SET_BINARY_MODE(file) _setmode(_fileno(file), O_BINARY)
-// #else
-// #  define SET_BINARY_MODE(file)
-// #endif
-
-// for debugging purposes, not intended to be used
-void print_byte(char &c){ std::cout << c << "\n"; };
+#if defined(MSDOS) || defined(OS2) || defined(WIN32) || defined(__CYGWIN__)
+#  include <fcntl.h>
+#  include <io.h>
+#  define SET_BINARY_MODE(file) _setmode(_fileno(file), O_BINARY)
+#else
+#  define SET_BINARY_MODE(file)
+#endif
 
 // 32 bit crc validation
 // all bytes after the length up to the crc bytes
@@ -69,44 +70,41 @@ class Chunks
     public:
 
         struct Pixel
-        {
-            unsigned char R;
-            unsigned char G;
-            unsigned char B;
-            unsigned char A;
-        };
+        { unsigned char R, G, B, A; };
 
     // IHDR values
-        unsigned long png_width { };             // little endian
-        unsigned long png_height { };            // little endian
-        unsigned char b_depth { };               // valid values 1, 2, 4, 8, 16
-        unsigned char color_type { };            // valid values 0, 2, 3, 4, 6
-        unsigned char comp_method { };           // should be 0 for standard
-        unsigned char filter_method { };         // should be 0 for standard
-        unsigned char interlace_method { };      // 0 == no interlace, 1 == Adam7
+        unsigned long png_width         = 0;            // little endian
+        unsigned long png_height        = 0;            // little endian
+        unsigned char b_depth           = 0;            // valid values 1, 2, 4, 8, 16
+        unsigned char color_type        = 0;            // valid values 0, 2, 3, 4, 6
+        unsigned char comp_method       = 0;            // should be 0 for standard
+        unsigned char filter_method     = 0;            // should be 0 for standard
+        unsigned char interlace_method  = 0;            // 0 == no interlace, 1 == Adam7
+
+        // 1 == alpha channel
+        // 0 == no alpha channel
+        unsigned char alpha_flag        = 0; 
     // sRGB values
         // 0 == Perceptual
         // 1 == Relative Colorimetric
         // 2 == Saturation
         // 3 == Absolute Colorimetric
-        char rendering_intent { };
+        unsigned char rendering_intent  = 0;;
     // gAMA values
         unsigned long gamma { };
     // pHYs values
-        unsigned long pixel_per_unit_x { };
-        unsigned long pixel_per_unit_y { };
+        unsigned long pixel_per_unit_x  = 0;
+        unsigned long pixel_per_unit_y  = 0;
 
         // 0 == unknown
         // 1 == meter
-        unsigned char unit_specificer { };
+        unsigned char unit_specificer   = 0;
     // IDAT values
-        std::vector< std::vector<Pixel > >* image_matrix = new std::vector< std::vector<Pixel> >;
+        std::vector< std::vector<Pixel> > image_matrix;
         std::vector<unsigned char> compresed_data { };
         std::vector<unsigned char> out { };
         std::vector<unsigned char> b { };
         //std::vector< std::vector<Pixel> > pixels { };
-
-
 
     // IHDR
     // 0x49 0x48 0x44 0x52
@@ -134,12 +132,14 @@ class Chunks
             this->png_height = little_to_big_endian(endian_buff);
             endian_buff.clear();
 
-            // all remaining ihdr bytes are size 1
+            // all remaining ihdr fields are one byte each
             this->b_depth          = (int)file.get(); --length;
             this->color_type       = (int)file.get(); --length;
             this->comp_method      = (int)file.get(); --length;
             this->filter_method    = (int)file.get(); --length;
             this->interlace_method = (int)file.get(); --length;
+
+            this->color_type == 4 || this->color_type == 6 ? this->alpha_flag = 0 : this->alpha_flag = 1;
 
             if(length != 0) { std::cout << "file sync error: ihdr \n"; throw; };
 
@@ -152,6 +152,7 @@ class Chunks
     // 0x73 0x52 0x47 0x42
         int read_sRGB(std::ifstream &file, unsigned long &length)
         {
+            
             this->rendering_intent = file.get(); --length;
 
             if(length != 0) { std::cout << "file sync error: srgb \n"; throw; };
@@ -200,29 +201,15 @@ class Chunks
         int read_IDAT(std::ifstream& file, unsigned long& length)
         {
             unsigned int i;
-            int err;
-            //unsigned long compressed_data_length = length;
-
+            unsigned int err;
+         
             for(i=0;i<length;++i) this->compresed_data.push_back(file.get());
         
             err = inf(compresed_data, length, out);
             if(err) return 1;
 
-
-            //for(int i=0;i<b.size();++i) std::cout << (int)b[i] << " ";
             err = construct_image_matrix();
             if(err) return 1;
-
-            
-            
-            // for(int w=0;w<this->png_width;++w)
-            // {
-            //     for(int h=0;h<this->png_height;++h)
-            //     {
-            //         //
-        
-            //     };
-            // }
 
             crc_32(file);
 
@@ -249,12 +236,8 @@ class Chunks
         int inf(std::vector<unsigned char>& data, unsigned long& len, std::vector<unsigned char>& out)
         {
 
-            // unsigned char buffer[CHUNK];
             out.resize(this->png_height * this->png_width * 4 + this->png_height);
-            //out.push_back('\0');
-            //out.reserve(CHUNK);
-            
-           
+          
             int codes               { }; // zlib return codes
             unsigned int have       { }; // number of bytes read
             int r, c, i, j;
@@ -283,7 +266,8 @@ class Chunks
                     stream.next_out     = reinterpret_cast<unsigned char* >(out.data());
 
                     codes = inflate(&stream, Z_NO_FLUSH);
-                    if(codes == Z_BUF_ERROR) return 0;
+                    if(codes == Z_BUF_ERROR) { inflateEnd(&stream); return 0; } // not sure if this is a good idea or not
+
                     switch(codes)
                     {
                         case Z_NEED_DICT:
@@ -310,11 +294,18 @@ class Chunks
                 } while (codes != Z_STREAM_END);
             } while(stream.avail_out == 0);
         
-            // for(int k =0;k<have;++k) std::cout << (unsigned int)out[k] << " ";
-
             return 0;
            
         };
+
+        // alpha flag == 1
+        void RGBA(Pixel& p, unsigned int& pos)
+        {
+            p.R = b[pos]; ++pos;
+            p.G = b[pos]; ++pos;
+            p.B = b[pos]; ++pos;
+            if(!this->alpha_flag) { p.A = b[pos]; ++pos; };
+        }
 
         int construct_image_matrix()
         {
@@ -322,32 +313,30 @@ class Chunks
             unsigned int l = b.capacity();
             std::vector<Pixel> pixels { };
 
-            unsigned long a = 0;
-
             unsigned long h, w, i;
+            h = w = i = 0;
 
+           
+            
             Pixel p;
 
-            h = w = i = 0;
-       
+            unsigned int pos = 0;
+
             for(h=0;h<this->png_height;++h)
             {
+                ++pos;
                 for(w=0;w<this->png_width;++w)
                 {
-                    unsigned long pos = 1;
-                    
-                        p.R = b[pos]; ++pos;
-                        p.G = b[pos]; ++pos;
-                        p.B = b[pos]; ++pos;
-                        p.A = b[pos]; ++pos;
-                        // pixels.push_back(b[pos]);
-                        //++pos;
-                    
+                    if(pos > l) return 0;
+
+                    RGBA(p, pos);
+
                     pixels.push_back(p);
-                
+
                 };
-                // std::cout << ++a << "\n";
-                image_matrix->push_back(pixels);
+                
+                image_matrix.push_back(pixels);
+                pixels.clear();
                 
             };
 
@@ -365,12 +354,11 @@ class PNG
         void read_bytes(std::string &filepath)
         {
             std::ifstream file { filepath, std::ios_base::binary | std::ios_base::in }; 
+            if(!file.is_open()){ std::cerr << "Error opening: " << filepath << "\n"; throw; };
             unsigned long len, id;
 
             len = id = 0;
-            
-            if(!file.is_open()){ std::cerr << "Error opening: " << filepath << "\n"; throw; };
-
+         
             validate_header(file); // offsets file reader by 8 bytes, only called once
 
             identify_chunk(file, len, id); // offsets file reader by 8 bytes on every call
@@ -420,15 +408,64 @@ class PNG
 
         ~PNG(){};
 
-        unsigned long width() { return Chunks.png_width ; };
-        unsigned long height(){ return Chunks.png_height; };
+
+        int write_file(std::string& new_filepath)
+        {
+            std::ifstream file { new_filepath, std::ios_base::binary | std::ios_base::out }; 
+            if(!file.is_open()){ std::cerr << "Error opening: " << new_filepath << "\n"; throw; };
+        }
+
+        /* user methods
+        *
+        *
+        *
+        */
+        void print_ihdr()
+        {
+            std::cout <<
+            "length             :   " << (int)Chunks.png_width           << "\n" <<
+            "width              :   " << (int)Chunks.png_height          << "\n" <<
+            "bit_depth          :   " << (int)Chunks.b_depth             << "\n" <<
+            "color type         :   " << (int)Chunks.color_type          << "\n" <<
+            "compression method :   " << (int)Chunks.comp_method         << "\n" <<
+            "filter method      :   " << (int)Chunks.filter_method       << "\n" <<
+            "interlace method   :   " << (int)Chunks.interlace_method    << "\n" ;
+        };
+       
+
+       void print_pixels()
+       {
+
+            unsigned long w, h;
+            h = w = 0;
+
+            for(int w=0;w<Chunks.png_width;++w)
+            {
+                for(int h=0;h<Chunks.png_height;++h)
+                {
+                    
+                    std::cout << 
+                    (int)Chunks.image_matrix[w][h].R << " " <<
+                    (int)Chunks.image_matrix[w][h].G << " " <<
+                    (int)Chunks.image_matrix[w][h].B << " " <<
+                    (int)Chunks.image_matrix[w][h].A << " \n ";
+                    
+                };
+            };
+
+       };
+
+       void pixel_at(unsigned short& x, unsigned short& y)
+       {
+
+       }
+
+
         
     protected:
 
         std::vector<char> PNG_SIG  
-        { 
-            '\x89', '\x50', '\x4e', '\x47', '\x0d', '\x0a', '\x1a', '\x0a' 
-        }; 
+        { '\x89', '\x50', '\x4e', '\x47', '\x0d', '\x0a', '\x1a', '\x0a' }; 
     
     /* function to identify the png header
     *
@@ -463,10 +500,3 @@ class PNG
             b.clear();
         };           
 };
-
-
-
-// 18783
-
-
-
