@@ -20,13 +20,6 @@
 #include <cassert>
 
 
-#define IHDR 295;
-#define sRGB 334;
-#define gAMA 310;
-#define pHYs 388;
-#define IDAT 290;
-#define IEND 288;
-
 // recommended space allocation for inflate() efficiency
 #define CHUNK 16384
 
@@ -355,9 +348,17 @@ class PNG
         {
             std::ifstream file { filepath, std::ios_base::binary | std::ios_base::in }; 
             if(!file.is_open()){ std::cerr << "Error opening: " << filepath << "\n"; throw; };
-            unsigned long len, id;
 
-            len = id = 0;
+            unsigned long len, id; len = id = 0;
+            int err = 0;
+
+            #define IEND 288
+            #define IDAT 290
+            #define IHDR 295
+            #define PLTE 309
+            #define gAMA 310
+            #define sRGB 334
+            #define pHYs 388
          
             validate_header(file); // offsets file reader by 8 bytes, only called once
 
@@ -369,11 +370,12 @@ class PNG
         * the code after this warning will run with undefined behavior.
         * 
         */
-            if(id != 295) std::cout << 
+            if(id != IHDR) std::cout << 
             "WARNING! PNG header not followed by IDHR chunk" <<
             " - We're decoding a questionably encoded PNG \n";
 
-            Chunks.read_ihdr(file, len);
+            Chunks.read_ihdr(file, len); 
+  
 
         /* main file decoder
         *
@@ -381,8 +383,10 @@ class PNG
         * each case is the sum of individual ascii bytes parsed from identity_chunk().
         * 
         */
+        
             while(!file.eof())
             {
+
                 len = id = 0;
 
                 identify_chunk(file, len, id); // offsets file reader by 8 bytes on every call
@@ -390,12 +394,12 @@ class PNG
                 // it is a guarantee that the chunk is offset up to the first byte after the header
                 switch(id)
                 {
-                    case 334: { int err = Chunks.read_sRGB(file, len); if(!err) break; throw; }
-                    case 310: { int err = Chunks.read_gAMA(file, len); if(!err) break; throw; }
-                    case 388: { int err = Chunks.read_pHYs(file, len); if(!err) break; throw; }
-                    case 290: { int err = Chunks.read_IDAT(file, len); if(!err) break; throw; }
-                    case 288: { int err = Chunks.read_IEND(file, len); if(!err) break; throw; }
-                    default: std::cout << "did not catch a chunk id \n";
+                    case sRGB: { err = Chunks.read_sRGB(file, len); if(!err) break; throw; }
+                    case gAMA: { err = Chunks.read_gAMA(file, len); if(!err) break; throw; }
+                    case pHYs: { err = Chunks.read_pHYs(file, len); if(!err) break; throw; }
+                    case IDAT: { err = Chunks.read_IDAT(file, len); if(!err) break; throw; }
+                    case IEND: { err = Chunks.read_IEND(file, len); if(!err) break; throw; }
+                    //default: std::cout << "did not catch a chunk id \n";
                 };
             };
 
@@ -409,10 +413,19 @@ class PNG
         ~PNG(){};
 
 
-        int write_file(std::string& new_filepath)
+        void write_file(std::string& new_filepath)
         {
-            std::ifstream file { new_filepath, std::ios_base::binary | std::ios_base::out }; 
-            if(!file.is_open()){ std::cerr << "Error opening: " << new_filepath << "\n"; throw; };
+            std::ofstream new_file { new_filepath, std::ios_base::binary | std::ios_base::out }; 
+            if(!new_file.is_open()){ std::cerr << "Error opening: " << new_filepath << "\n"; throw; };
+
+            for(int i=0;i<this->PNG_SIG.size();++i)
+            {
+                new_file << PNG_SIG[i];
+                
+            }
+
+            new_file.close();
+
         }
 
         /* user methods
