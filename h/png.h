@@ -5,12 +5,9 @@
 * png home page             - http://www.libpng.org/pub/png/
 * inflate algo example      - https://github.com/madler/zlib/blob/master/contrib/puff/puff.c
 * inflate annotated code    - http://zlib.net/zlib_how.html
+* amazing crc doc           - http://www.ross.net/crc/download/crc_v3.txt
 *
-* todo:
-* change longs to ints where appropriate and dont support images of len/ height == 4 billion
-* impliment zlib crc
-* finish all chunks per spec
-* figure out IEND bug
+* this code is not appropriate for production
 */
 
 #include "zlib.h"
@@ -20,6 +17,7 @@
 #include <fstream>
 #include <cassert>
 #include <map>
+#include <stdexcept>
 
  // recommended space allocation for inflate() efficiency
 #define CHUNK 16384
@@ -36,12 +34,12 @@
 #  define SET_BINARY_MODE(file)
 #endif
 
+
 // 32 bit crc validation
 // all bytes after the length up to the crc bytes
-void crc_32(std::ifstream& file)
+void crc_32(std::vector<unsigned char>& buffer)
 {
-    // impliment the zlib crc32 here
-    for(int i { 4 }; i > 0; --i){ file.get(); };
+    buffer.clear();
 };
 
 
@@ -51,7 +49,7 @@ void crc_32(std::ifstream& file)
 * this function does not yet consider the endianness of the system it's running on and is hacky for now
 *
 */
-unsigned long little_to_big_endian(std::vector<int>& endian_buff)
+unsigned long little_to_big_endian(std::vector<unsigned char>& endian_buff)
 {
     return (int)endian_buff[3] | (int)endian_buff[2]<<8 | (int)endian_buff[1]<<16 | (int)endian_buff[0]<<24;
 };
@@ -109,62 +107,74 @@ class Chunks
         std::vector<unsigned char> out                                      { };
         std::vector<unsigned char> b                                        { };
         unsigned long len                   = 0;
-        //std::vector< std::vector<Pixel> > pixels { };
+     
+        std::vector<unsigned char> chunk_buffer                             { };
+
+    void chunk_buffer_writer(std::ifstream& file, unsigned long& length)
+    {
+            int i = 0;
+            for(i;i<length;++i)
+            {
+                this->chunk_buffer.push_back(file.get());
+            };
+
+    };
 
     // IHDR
     // 0x49 0x48 0x44 0x52
-        int read_ihdr(std::ifstream& file, unsigned long &length)
+        int read_ihdr(std::ifstream& file, unsigned long& length)
         {
-          
-            std::vector<int> endian_buff { };
+            int i = 8;
+
+            chunk_buffer_writer(file, length);
+
+            std::vector<unsigned char> endian_buff { };
             std::vector<char> header { };
 
             // get the width
-            for(int i = 0; i < 4; ++i)
+            for(i;i<=11;++i)
             { 
-                endian_buff.push_back(file.get()); 
-                --length; 
+                endian_buff.push_back(this->chunk_buffer[i]); 
+        
             };
             this->png_width = little_to_big_endian(endian_buff);
             endian_buff.clear();
 
             // get the height
-            for(int i = 0; i < 4; ++i)
+            for(i=12;i<=15;++i)
             { 
-                endian_buff.push_back(file.get()); 
-                --length; 
+                endian_buff.push_back(this->chunk_buffer[i]); 
+
             }; 
             this->png_height = little_to_big_endian(endian_buff);
             endian_buff.clear();
 
             // all remaining ihdr fields are one byte each
-            this->b_depth          = (int)file.get(); --length;
-            this->color_type       = (int)file.get(); --length;
-            this->comp_method      = (int)file.get(); --length;
-            this->filter_method    = (int)file.get(); --length;
-            this->interlace_method = (int)file.get(); --length;
+            this->b_depth          = this->chunk_buffer[16];
+            this->color_type       = this->chunk_buffer[17];
+            this->comp_method      = this->chunk_buffer[18];
+            this->filter_method    = this->chunk_buffer[19];
+            this->interlace_method = this->chunk_buffer[20];
 
             this->color_type == 4 || this->color_type == 6 ? this->alpha_flag = 0 : this->alpha_flag = 1;
 
-            if(length != 0) { std::cout << "file sync error: ihdr \n"; throw; };
-
-            crc_32(file); // offsets files by 4 bytes
+            crc_32(this->chunk_buffer);
 
             return 0;
         };
 
     // SRGB
     // 0x73 0x52 0x47 0x42
-        int read_sRGB(std::ifstream &file, unsigned long &length)
+        int read_sRGB(std::ifstream& file, unsigned long& length)
         {
+    
+            this->chunk_flags["sRGB"] = 1;
+            
+            chunk_buffer_writer(file, length);
 
-            chunk_flags["sRGB"] = 1;
+            this->rendering_intent = this->chunk_buffer[8];
 
-            this->rendering_intent = file.get(); --length;
-
-            if(length != 0) { std::cout << "file sync error: srgb \n"; throw; };
-
-            crc_32(file); // offsets files by 4 bytes
+            crc_32(this->chunk_buffer);
 
             return 0;
 
@@ -172,31 +182,24 @@ class Chunks
 
     // PLTE
     // 0x50 0x4C 0x54 0x45
-        int read_PLTE(std::ifstream &file, unsigned long &length)
+        int read_PLTE(std::ifstream& file, unsigned long& length)
         {
 
-            chunk_flags["PLTE"] = 1;
+            int i = 8;
+            this->chunk_flags["PLTE"] = 1;
 
-            unsigned long len = length;
+            chunk_buffer_writer(file, length);
+
             if(!length % 3) { std::cout << "PLTE not divisible by 3. \n"; return 1; };
 
-            palate.resize(len / 3);
+            this->palate.resize(length / 3);
 
-            for(int i=0;i<len;++i)
+            for(i;i<length;++i)
             {
-                if(i % 3 == 0) 
-                {
-                    palate.push_back(file.get());
-                    --length;
-                }
-                else
-                {
-                    file.ignore();
-                    --length;
-                }
-            }
+                if(i % 3 == 0) palate.push_back(this->chunk_buffer[i]);
+            };
 
-            crc_32(file); // offsets files by 4 bytes
+            crc_32(this->chunk_buffer); // offsets files by 4 bytes
 
             return 0;
            
@@ -204,16 +207,19 @@ class Chunks
 
     // GAMA
     // 0x67 0x41 0x4D 0x41
-        int read_gAMA(std::ifstream &file, unsigned long &length)
+        int read_gAMA(std::ifstream& file, unsigned long& length)
         {
-
+            int i = 8;
             chunk_flags["gAMA"] = 1;
 
-            for(int i = 0; i < 4; ++i){ this->gamma = file.get(); --length; };
+            chunk_buffer_writer(file, length);
 
-            if(length != 0) { std::cout << "file sync error: gama \n"; throw; };
+            for(i;i<12;++i)
+            { 
+                this->gamma += this->chunk_buffer[i];
+            };
 
-            crc_32(file); // offsets files by 4 bytes
+            crc_32(this->chunk_buffer); // offsets files by 4 bytes
 
             return 0;
 
@@ -226,19 +232,28 @@ class Chunks
 
     // PHYS
     // 0x70 0x48 0x59 0x73
-        int read_pHYs(std::ifstream &file, unsigned long &length)
+        int read_pHYs(std::ifstream& file, unsigned long& length)
         {
 
+            int i = 8;
             chunk_flags["pHYs"] = 1;
 
-            for(int i = 0; i < 4; ++i){ this->pixel_per_unit_x = file.get(); --length; };
-            for(int i = 0; i < 4; ++i){ this->pixel_per_unit_y = file.get(); --length; };
+            chunk_buffer_writer(file, length);
 
-            this->unit_specificer = file.get(); --length;
+            for(i;i<12;++i)
+            { 
+                this->pixel_per_unit_x += this->chunk_buffer[i];
+            };
 
-            if(length != 0) { std::cout << "file sync error: phys \n"; throw; };
+            for(i;i<16;++i)
+            { 
+                this->pixel_per_unit_y += this->chunk_buffer[i];
+            };
 
-            crc_32(file); // offsets files by 4 bytes
+            this->unit_specificer = this->chunk_buffer[17];
+
+
+            crc_32(this->chunk_buffer); // offsets files by 4 bytes
 
             return 0;
 
@@ -248,12 +263,17 @@ class Chunks
     // 0x49 0x44 0x54 0x78
         int read_IDAT(std::ifstream& file, unsigned long& length)
         {
-            unsigned int i;
+            int i = 8;
             unsigned int err;
 
             unsigned long len = length;
+
+            chunk_buffer_writer(file, length);
          
-            for(i=0;i<length;++i) this->compresed_data.push_back(file.get());
+            for(i;i<length;++i)
+            {
+                this->compresed_data.push_back(this->chunk_buffer[i]);
+            };
         
             err = inf(compresed_data, length, out);
             if(err) return 1;
@@ -261,7 +281,7 @@ class Chunks
             err = construct_image_matrix();
             if(err) return 1;
 
-            crc_32(file);
+            crc_32(this->chunk_buffer);
 
             return 0;
         };
@@ -270,8 +290,7 @@ class Chunks
     // 0x49 0x45 0x4E 0x44
         int read_IEND(std::ifstream& file, unsigned long& length)
         {
-            crc_32(file);
-            // do nothing for now
+            crc_32(this->chunk_buffer);
 
             return 0;
         };
@@ -286,7 +305,8 @@ class Chunks
 
             out.resize(CHUNK);
           
-            int codes               = 0; // zlib return codes
+            int codes, i;                // zlib return codes            
+            codes = i               = 0; 
             unsigned int have       = 0; // number of bytes read
       
             z_stream stream;
@@ -332,7 +352,7 @@ class Chunks
 
                     have = CHUNK - stream.avail_out;
 
-                    for(int i=0;i<have;++i){ b.push_back(out[i]); };
+                    for(i=0;i<have;++i){ b.push_back(out[i]); };
 
                     out.clear();
                   
@@ -447,17 +467,22 @@ class PNG
             pHYs = 388,
         };
 
-        void read_bytes(std::string &filepath)
+        void read_bytes(std::string& filepath)
         {
             std::ifstream file { filepath, std::ios_base::binary | std::ios_base::in }; 
             if(!file.is_open()){ std::cerr << "Error opening: " << filepath << "\n"; throw; };
 
-            unsigned long len, id; len = id = 0;
+            unsigned long chunk_length, chunk_id; 
+            chunk_length = chunk_id = 0;
             int err = 0;
 
-            validate_header(file); // offsets file reader by 8 bytes, only called once
+            
 
-            identify_chunk(file, len, id); // offsets file reader by 8 bytes on every call
+            validate_header(file); 
+
+            identify_chunk(file, chunk_length, chunk_id); 
+
+        // file will be offset by 16 bytes at this point
 
         /* ihdr is the chunk that must follow the png header per the specification
         * 
@@ -465,11 +490,11 @@ class PNG
         * the code after this warning will run with undefined behavior.
         * 
         */
-            if(id != IHDR) std::cout << 
+            if(chunk_id != IHDR) std::cout << 
             "WARNING! PNG header not followed by IDHR chunk" <<
             " - We're decoding a questionably encoded PNG \n";
 
-            Chunks.read_ihdr(file, len); 
+            //Chunks.read_ihdr(file, chunk_id); 
   
 
         /* main file decoder
@@ -482,19 +507,20 @@ class PNG
             while(!file.eof())
             {
 
-                len = id = 0;
+                chunk_length = chunk_id = 0;
 
-                identify_chunk(file, len, id); // offsets file reader by 8 bytes on every call
+                identify_chunk(file, chunk_length, chunk_id); // offsets file reader by 8 bytes on every call
 
                 // it is a guarantee that the chunk is offset up to the first byte after the header
-                switch(id)
+                switch(chunk_id)
                 {
-                    case sRGB: { err = Chunks.read_sRGB(file, len); if(!err) break; throw; }
-                    case gAMA: { err = Chunks.read_gAMA(file, len); if(!err) break; throw; }
-                    case PLTE: { err = Chunks.read_PLTE(file, len); if(!err) break; throw; }
-                    case pHYs: { err = Chunks.read_pHYs(file, len); if(!err) break; throw; }
-                    case IDAT: { err = Chunks.read_IDAT(file, len); if(!err) break; throw; } // need to consider continous idat blocks
-                    case IEND: { err = Chunks.read_IEND(file, len); if(!err) break; throw; }
+                    case IHDR: { err = Chunks.read_ihdr(file, chunk_length); if(!err) break; throw; }
+                    case sRGB: { err = Chunks.read_sRGB(file, chunk_length); if(!err) break; throw; }
+                    case gAMA: { err = Chunks.read_gAMA(file, chunk_length); if(!err) break; throw; }
+                    case PLTE: { err = Chunks.read_PLTE(file, chunk_length); if(!err) break; throw; }
+                    case pHYs: { err = Chunks.read_pHYs(file, chunk_length); if(!err) break; throw; }
+                    case IDAT: { err = Chunks.read_IDAT(file, chunk_length); if(!err) break; throw; } // need to consider continous idat blocks
+                    case IEND: { err = Chunks.read_IEND(file, chunk_length); if(!err) break; throw; }
                     //default: std::cout << "did not catch a chunk id \n";
                 };
             };
@@ -514,12 +540,9 @@ class PNG
             std::ofstream new_file { new_filepath, std::ios_base::binary | std::ios_base::out }; 
             if(!new_file.is_open()){ std::cerr << "Error opening: " << new_filepath << "\n"; throw; };
 
-            for(int i=0;i<this->PNG_SIG.size();++i)
-            {
-                new_file << PNG_SIG[i];
-                
-            }
-
+        // write png header
+            for(int i=0;i<this->PNG_SIG.size();++i) new_file << PNG_SIG[i];
+        
             new_file.close();
 
         }
@@ -599,12 +622,22 @@ class PNG
     * this function is intended to only be ran once by the decoder.
     * 
     */
-        void validate_header(std::ifstream &file)
+        void validate_header(std::ifstream& file)
         {
             std::vector<char> head_buff;
 
-            for(int i { }; i < 8; ++i) head_buff.push_back(file.get());               // read first 8 bytes into header buffer
-            if(this->PNG_SIG != head_buff){ std::cout << "Bad PNG" << "\n"; throw; }; // validate header as valid png
+            int i = 0;
+
+            for(i;i<8;++i)
+            {
+                head_buff.push_back(file.get());
+            } 
+
+            if(this->PNG_SIG != head_buff)
+            { 
+                std::cout << "Bad PNG" << "\n"; 
+                throw; 
+            };
         };
 
     /* function to identify chunks. 
@@ -615,14 +648,19 @@ class PNG
     */
         void identify_chunk(std::ifstream& file, unsigned long& len, unsigned long& id)
         {
-            std::vector<int> b { };
-           
-            for(int i = 0; i < 4; ++i) b.push_back(file.get()); // get 4 byte chunk size 
+            int i = 0;
 
-            len = little_to_big_endian(b);
+            for(i;i<8;++i)
+            {
+                Chunks.chunk_buffer.push_back(file.get());
+            };
 
-            for(int i = 0; i < 4; ++i) id  += file.get();       // get 4 byte chunk id
+            len = little_to_big_endian(Chunks.chunk_buffer);
 
-            b.clear();
+            for(i = 4;i<8;++i) 
+            {
+                id  += Chunks.chunk_buffer[i];       // get 4 byte chunk id
+            };
+
         };           
 };
