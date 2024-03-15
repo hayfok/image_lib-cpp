@@ -113,9 +113,10 @@ class Chunks
     void chunk_buffer_writer(std::ifstream& file, unsigned long& length)
     {
             int i = 0;
-            for(i;i<length;++i)
+            for(i;i<length + 4;++i)
             {
                 this->chunk_buffer.push_back(file.get());
+                
             };
 
     };
@@ -125,7 +126,7 @@ class Chunks
         int read_ihdr(std::ifstream& file, unsigned long& length)
         {
             int i = 8;
-
+            length -= 8;
             chunk_buffer_writer(file, length);
 
             std::vector<unsigned char> endian_buff { };
@@ -144,7 +145,6 @@ class Chunks
             for(i=12;i<=15;++i)
             { 
                 endian_buff.push_back(this->chunk_buffer[i]); 
-
             }; 
             this->png_height = little_to_big_endian(endian_buff);
             endian_buff.clear();
@@ -169,6 +169,7 @@ class Chunks
         {
     
             this->chunk_flags["sRGB"] = 1;
+            
             
             chunk_buffer_writer(file, length);
 
@@ -212,6 +213,7 @@ class Chunks
             int i = 8;
             chunk_flags["gAMA"] = 1;
 
+           
             chunk_buffer_writer(file, length);
 
             for(i;i<12;++i)
